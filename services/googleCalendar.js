@@ -724,8 +724,15 @@ async function createEventWithCustomId(calendarId, eventData, customEventId) {
 
     const calendar = await getCalendarInstance();
 
-    // Generar ID válido para Google Calendar (debe ser alfanumérico minúsculas)
-    const eventId = customEventId.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Generar ID válido para Google Calendar
+    // Google Calendar requiere: 5-1024 caracteres, solo minúsculas, números, guiones y guiones bajos
+    let eventId = customEventId.toLowerCase().replace(/[^a-z0-9]/g, '');
+    
+    // Asegurar que tenga al menos 5 caracteres
+    if (eventId.length < 5) {
+      eventId = eventId + 'x'.repeat(5 - eventId.length);
+    }
+    
     console.log(`🔑 ID del evento (normalizado): ${eventId}`);
 
     // PASO 1: Verificar si el evento ya existe
@@ -794,21 +801,37 @@ async function createEventWithCustomId(calendarId, eventData, customEventId) {
     if (existingEvent) {
       // ACTUALIZAR evento existente
       console.log(`🔄 Actualizando evento existente: "${event.summary}"`);
-      response = await calendar.events.update({
-        calendarId: calendarId,
-        eventId: eventId,
-        resource: event
-      });
-      console.log(`✅ Evento actualizado con ID: ${response.data.id}`);
+      try {
+        response = await calendar.events.update({
+          calendarId: calendarId,
+          eventId: eventId,
+          resource: event
+        });
+        console.log(`✅ Evento actualizado con ID: ${response.data.id}`);
+      } catch (updateError) {
+        console.error(`❌ Error al actualizar evento:`, updateError.message);
+        console.error(`📋 EventId usado: ${eventId}`);
+        throw updateError;
+      }
     } else {
       // CREAR nuevo evento con ID personalizado
       event.id = eventId;
       console.log(`📝 Creando nuevo evento: "${event.summary}"`);
-      response = await calendar.events.insert({
-        calendarId: calendarId,
-        resource: event
-      });
-      console.log(`✅ Evento creado con ID personalizado: ${response.data.id}`);
+      console.log(`📋 Con ID personalizado: ${eventId}`);
+      
+      try {
+        response = await calendar.events.insert({
+          calendarId: calendarId,
+          resource: event
+        });
+        console.log(`✅ Evento creado con ID personalizado: ${response.data.id}`);
+      } catch (insertError) {
+        console.error(`❌ Error al insertar evento:`, insertError.message);
+        console.error(`📋 EventId intentado: ${eventId}`);
+        console.error(`📋 Longitud del ID: ${eventId.length}`);
+        console.error(`📋 Caracteres válidos: ${/^[a-z0-9]+$/.test(eventId)}`);
+        throw insertError;
+      }
     }
 
     return {
@@ -820,7 +843,8 @@ async function createEventWithCustomId(calendarId, eventData, customEventId) {
 
   } catch (error) {
     console.error(`❌ Error creando/actualizando evento: ${error.message}`);
-    console.error(`📚 Detalle del error:`, error);
+    console.error(`📚 Stack:`, error.stack);
+    console.error(`📚 Response data:`, error.response?.data);
     return {
       success: false,
       error: error.message,
