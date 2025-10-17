@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const moment = require('moment-timezone');
+const cron = require('node-cron');
 
 // Configurar moment en español
 moment.locale('es');
@@ -12,6 +13,8 @@ const { initializeAuth, getCalendarInstance } = require('./services/googleAuth')
 const { getSheetData, findData, findWorkingHours, updateClientStatus, updateClientAppointmentDateTime, getClientDataByReservationCode, saveClientDataOriginal, ensureClientsSheet, consultaDatosPacientePorTelefono } = require('./services/googleSheets');
 const { findAvailableSlots, cancelEventByReservationCodeOriginal, createEventOriginal, createEventWithCustomId, generateUniqueReservationCode, formatTimeTo12Hour } = require('./services/googleCalendar');
 const { sendAppointmentConfirmation, sendNewAppointmentNotification, sendRescheduledAppointmentConfirmation, emailServiceReady } = require('./services/emailService');
+const { getUpcomingAppointments24h, getUpcomingAppointments15min, sendEmailReminder24h, sendEmailReminder15min } = require('./services/reminderService');
+const { sendWhatsAppReminder24h, sendWhatsAppReminder15min } = require('./services/whatsappService');
 
 const app = express();
 const PORT = config.server.port;
@@ -538,6 +541,7 @@ app.get('/', (req, res) => {
       agenda_cita: `POST ${serverUrl}/api/agenda-cita`,
       cancela_cita: `POST ${serverUrl}/api/cancela-cita`,
       reagenda_cita: `POST ${serverUrl}/api/reagenda-cita`,
+      confirma_cita: `POST ${serverUrl}/api/confirma-cita`,
       consulta_fecha: `GET ${serverUrl}/api/consulta-fecha-actual`,
       consulta_datos_paciente: `GET ${serverUrl}/api/consulta-datos-paciente`
     },
@@ -1245,6 +1249,98 @@ Agendado por: Agente de WhatsApp`;
     console.error('💥 Error en reagendamiento:', error.message);
     console.error('Stack:', error.stack);
     return res.json({ respuesta: '🤖 Ha ocurrido un error inesperado al reagendar la cita.' });
+  }
+});
+
+/**
+ * ENDPOINT: Confirmar cita
+ */
+app.post('/api/confirma-cita', async (req, res) => {
+  try {
+    console.log('✅ === CONFIRMACIÓN DE CITA ===');
+    console.log('Body recibido:', JSON.stringify(req.body, null, 2));
+    
+    const { codigo_reserva } = req.body;
+
+    // PASO 1: Validar parámetros
+    if (!codigo_reserva) {
+      return res.json({ 
+        respuesta: '⚠️ Error: Se requiere el codigo_reserva.' 
+      });
+    }
+
+    console.log(`📊 Código de reserva: ${codigo_reserva}`);
+
+    // PASO 2: Obtener información de la cita desde Google Sheets
+    console.log('📋 Obteniendo información de la cita...');
+    const clientData = await getClientDataByReservationCode(codigo_reserva);
+    
+    if (!clientData) {
+      console.log(`❌ No se encontró cita con código: ${codigo_reserva}`);
+      return res.json({ 
+        respuesta: `❌ No se encontró ninguna cita con el código de reserva ${codigo_reserva.toUpperCase()}. Verifica que el código sea correcto.` 
+      });
+    }
+
+    console.log('✅ Información de la cita obtenida:', clientData);
+
+    // PASO 3: Verificar estado actual
+    if (clientData.estado === 'CANCELADA') {
+      return res.json({ 
+        respuesta: `⚠️ Esta cita ya fue cancelada. Si deseas agendar nuevamente, por favor comunícate con nosotros.` 
+      });
+    }
+
+    if (clientData.estado === 'CONFIRMADA') {
+      return res.json({ 
+        respuesta: `✅ Tu cita ya estaba confirmada previamente.\n\n📅 Detalles:\n• Fecha: ${clientData.date}\n• Hora: ${clientData.time}\n• Con: ${clientData.profesionalName}\n\n¡Te esperamos! 🌟` 
+      });
+    }
+
+    // PASO 4: Actualizar estado a CONFIRMADA
+    console.log('📝 Actualizando estado a CONFIRMADA...');
+    try {
+      await updateClientStatus(codigo_reserva, 'CONFIRMADA');
+      console.log('✅ Estado actualizado a CONFIRMADA');
+    } catch (updateError) {
+      console.error('⚠️ Error actualizando estado:', updateError.message);
+      return res.json({ 
+        respuesta: '❌ Error al confirmar la cita. Por favor, intenta nuevamente.' 
+      });
+    }
+
+    // PASO 5: Preparar respuesta con confirmación
+    const fechaFormateada = moment.tz(clientData.date, config.timezone.default).format('dddd, D [de] MMMM [de] YYYY');
+    const horaFormateada = formatTimeTo12Hour(clientData.time);
+
+    const finalResponse = {
+      respuesta: `✅ ¡Cita confirmada exitosamente! 🎉
+
+📅 Detalles de tu cita:
+• Fecha: ${fechaFormateada}
+• Hora: ${horaFormateada}
+• Cliente: ${clientData.clientName}
+• Servicio: ${clientData.serviceName}
+• Especialista: ${clientData.profesionalName}
+
+🎟️ Código de reserva: ${codigo_reserva.toUpperCase()}
+
+⚠️ Recuerda:
+• Llega 10 minutos antes
+• Trae tu código de reserva
+
+📍 ${config.business.address}
+
+¡Te esperamos! 🌟`
+    };
+
+    console.log('🎉 === CONFIRMACIÓN EXITOSA ===');
+    return res.json(finalResponse);
+
+  } catch (error) {
+    console.error('💥 Error en confirmación:', error.message);
+    console.error('Stack:', error.stack);
+    return res.json({ respuesta: '🤖 Ha ocurrido un error inesperado al confirmar la cita.' });
   }
 });
 
@@ -3236,6 +3332,49 @@ const swaggerDocument = {
         }
       }
     },
+    '/api/confirma-cita': {
+      post: {
+        summary: 'Confirma una cita existente',
+        description: 'Confirma la asistencia del cliente a una cita programada usando el código de reserva. Actualiza el estado de la cita a CONFIRMADA en Google Sheets.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['codigo_reserva'],
+                properties: {
+                  codigo_reserva: { 
+                    type: 'string', 
+                    example: 'ABC123',
+                    description: 'Código de reserva de la cita a confirmar'
+                  }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '200': {
+            description: 'Respuesta de confirmación',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    respuesta: { 
+                      type: 'string',
+                      example: '✅ ¡Cita confirmada exitosamente! 🎉\n\n📅 Detalles de tu cita:\n• Fecha: lunes, 20 de octubre de 2025\n• Hora: 3:00 PM\n• Cliente: Juan Pérez\n• Servicio: Consulta de valoración\n• Especialista: Dr. Juan\n\n🎟️ Código de reserva: ABC123'
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        tags: ['Citas']
+      }
+    },
     '/api/consulta-fecha-actual': {
       get: {
         summary: 'Obtiene la fecha y hora actual',
@@ -3593,6 +3732,94 @@ const getServerUrl = () => {
   return `http://localhost:${PORT}`;
 };
 
+// =================================================================
+// ⏰ CRON JOBS - RECORDATORIOS AUTOMÁTICOS
+// =================================================================
+
+/**
+ * Cron Job: Verificar citas próximas en 24 horas
+ * Se ejecuta cada hora
+ */
+cron.schedule('0 * * * *', async () => {
+  try {
+    console.log('⏰ === CRON: VERIFICANDO CITAS PRÓXIMAS (24H) ===');
+    console.log(`🕒 Ejecutado a las: ${moment().tz(config.timezone.default).format('YYYY-MM-DD HH:mm:ss')}`);
+    
+    const appointments = await getUpcomingAppointments24h();
+    
+    if (appointments.length === 0) {
+      console.log('✅ No hay citas próximas en las siguientes 24 horas');
+      return;
+    }
+    
+    console.log(`📊 Citas encontradas: ${appointments.length}`);
+    
+    // Enviar recordatorios por email y WhatsApp
+    for (const appointment of appointments) {
+      console.log(`\n📤 Enviando recordatorio a: ${appointment.clientName}`);
+      
+      // Enviar email
+      if (appointment.clientEmail && appointment.clientEmail !== 'Sin Email') {
+        await sendEmailReminder24h(appointment);
+      }
+      
+      // Enviar WhatsApp
+      if (appointment.clientPhone) {
+        await sendWhatsAppReminder24h(appointment);
+      }
+    }
+    
+    console.log('✅ Recordatorios de 24h enviados exitosamente');
+    
+  } catch (error) {
+    console.error('❌ Error en cron de 24h:', error.message);
+  }
+});
+
+/**
+ * Cron Job: Verificar citas próximas en 15 minutos
+ * Se ejecuta cada 45 minutos de lunes a sábado
+ */
+cron.schedule('*/45 * * * 1-6', async () => {
+  try {
+    console.log('⏰ === CRON: VERIFICANDO CITAS PRÓXIMAS (15MIN) ===');
+    console.log(`🕒 Ejecutado a las: ${moment().tz(config.timezone.default).format('YYYY-MM-DD HH:mm:ss')}`);
+    
+    const appointments = await getUpcomingAppointments15min();
+    
+    if (appointments.length === 0) {
+      console.log('✅ No hay citas próximas en los siguientes 15 minutos');
+      return;
+    }
+    
+    console.log(`📊 Citas encontradas: ${appointments.length}`);
+    
+    // Enviar recordatorios por email y WhatsApp
+    for (const appointment of appointments) {
+      console.log(`\n📤 Enviando recordatorio urgente a: ${appointment.clientName}`);
+      
+      // Enviar email
+      if (appointment.clientEmail && appointment.clientEmail !== 'Sin Email') {
+        await sendEmailReminder15min(appointment);
+      }
+      
+      // Enviar WhatsApp
+      if (appointment.clientPhone) {
+        await sendWhatsAppReminder15min(appointment);
+      }
+    }
+    
+    console.log('✅ Recordatorios de 15min enviados exitosamente');
+    
+  } catch (error) {
+    console.error('❌ Error en cron de 15min:', error.message);
+  }
+});
+
+console.log('✅ Cron jobs de recordatorios inicializados');
+console.log('   - Recordatorio 24h: Cada hora, Todos los días (0 * * * *)');
+console.log('   - Recordatorio 15min: Cada 15 minutos, Lunes a Sábado (*/15 * * * 1-6)');
+
 app.listen(PORT, () => {
   const serverUrl = getServerUrl();
   const isProduction = process.env.NODE_ENV === 'production';
@@ -3605,6 +3832,7 @@ app.listen(PORT, () => {
   console.log(`   POST ${serverUrl}/api/agenda-cita`);
   console.log(`   POST ${serverUrl}/api/cancela-cita`);
   console.log(`   POST ${serverUrl}/api/reagenda-cita`);
+  console.log(`   POST ${serverUrl}/api/confirma-cita`);
   console.log(`   GET  ${serverUrl}/api/consulta-fecha-actual`);
   console.log(`   GET  ${serverUrl}/api/eventos/:fecha`);
   console.log(`   POST ${serverUrl}/api/debug-agenda`);
