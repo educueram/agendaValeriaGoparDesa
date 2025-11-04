@@ -733,14 +733,17 @@ async function createEventWithCustomId(calendarId, eventData, customEventId) {
 
     // Generar ID válido para Google Calendar
     // Google Calendar requiere: 5-1024 caracteres, solo minúsculas, números, guiones y guiones bajos
-    let eventId = customEventId.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // NOTA: En la práctica, IDs cortos (< 10 caracteres) pueden dar error "Invalid resource id value"
+    let baseId = customEventId.toLowerCase().replace(/[^a-z0-9]/g, '');
     
-    // Asegurar que tenga al menos 5 caracteres
-    if (eventId.length < 5) {
-      eventId = eventId + 'x'.repeat(5 - eventId.length);
-    }
+    // Agregar timestamp corto para asegurar longitud mínima de ~10 caracteres
+    // y evitar el error "Invalid resource id value" de Google
+    const timestamp = Date.now().toString(36).slice(-6); // últimos 6 chars del timestamp en base36
+    let eventId = baseId + timestamp;
     
-    console.log(`🔑 ID del evento (normalizado): ${eventId}`);
+    console.log(`🔑 Base ID: ${baseId} (longitud: ${baseId.length})`);
+    console.log(`🔑 Timestamp: ${timestamp}`);
+    console.log(`🔑 ID del evento final (normalizado): ${eventId} (longitud: ${eventId.length})`);
 
     // PASO 1: Verificar si el evento ya existe
     let existingEvent = null;
