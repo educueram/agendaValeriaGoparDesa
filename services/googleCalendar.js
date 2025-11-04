@@ -737,8 +737,8 @@ async function createEventWithCustomId(calendarId, eventData, customEventId) {
     console.log('✅ Instancia de calendario obtenida correctamente');
 
     // Generar ID válido para Google Calendar
-    // Google Calendar requiere: 5-1024 caracteres, solo minúsculas, números, guiones y guiones bajos
-    // REQUISITO IMPORTANTE: Debe empezar con letra (no número)
+    // Google Calendar es MUY estricto con IDs personalizados (requisitos no documentados)
+    // Estrategia robusta: usar hexadecimal largo (mínimo 16 caracteres)
     let baseId = customEventId.toLowerCase().replace(/[^a-z0-9]/g, '');
     
     // Si el baseId empieza con número, agregar prefijo
@@ -747,17 +747,28 @@ async function createEventWithCustomId(calendarId, eventData, customEventId) {
       console.log(`⚠️ ID empezaba con número, agregando prefijo: ${baseId}`);
     }
     
-    // Agregar timestamp para asegurar longitud y unicidad
-    const timestamp = Date.now().toString(36).slice(-8); // últimos 8 chars del timestamp en base36
-    let eventId = baseId + timestamp;
+    // Generar un sufijo hexadecimal largo y único (timestamp + random)
+    const timestamp = Date.now().toString(16); // timestamp en hex
+    const random = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0'); // 6 dígitos hex random
+    const suffix = timestamp + random;
     
-    // Asegurar que empiece con letra
+    // Construir ID final: base + sufijo (mínimo 16-20 caracteres)
+    let eventId = baseId + suffix;
+    
+    // Padding adicional si es necesario para llegar a 20 caracteres (longitud segura)
+    if (eventId.length < 20) {
+      const padding = '0'.repeat(20 - eventId.length);
+      eventId = eventId + padding;
+    }
+    
+    // Asegurar que empiece con letra (doble verificación)
     if (/^\d/.test(eventId)) {
       eventId = 'e' + eventId;
     }
     
     console.log(`🔑 Base ID: ${baseId} (longitud: ${baseId.length})`);
-    console.log(`🔑 Timestamp: ${timestamp}`);
+    console.log(`🔑 Timestamp hex: ${timestamp}`);
+    console.log(`🔑 Random hex: ${random}`);
     console.log(`🔑 ID del evento final: ${eventId} (longitud: ${eventId.length})`);
     console.log(`🔑 Empieza con letra: ${/^[a-z]/.test(eventId) ? '✅' : '❌'}`);
 
