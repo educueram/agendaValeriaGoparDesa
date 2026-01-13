@@ -78,11 +78,11 @@ const config = {
   workingHours: {
     // Forzar horarios específicos (independiente de Google Sheets)
     forceFixedSchedule: process.env.FORCE_FIXED_SCHEDULE === 'true' || process.env.NODE_ENV === 'production',
-    startHour: Math.max(parseInt(process.env.WORKING_START_HOUR) || 10, 10),   // MÍNIMO 10 AM - NUNCA antes
+    startHour: parseInt(process.env.WORKING_START_HOUR) || 9,   // 9 AM (corregido de 10 AM)
     endHour: parseInt(process.env.WORKING_END_HOUR) || 19,     // 7 PM  
     lunchStartHour: parseInt(process.env.LUNCH_START_HOUR) || 14, // 2 PM
     lunchEndHour: parseInt(process.env.LUNCH_END_HOUR) || 15,     // 3 PM
-    slotIntervalMinutes: parseInt(process.env.SLOT_INTERVAL_MINUTES) || 60, // 1 hora
+    slotIntervalMinutes: parseInt(process.env.SLOT_INTERVAL_MINUTES) || 60, // 1 hora (sesiones de hora por hora)
     
     // Horarios especiales por día de la semana
     saturday: {
