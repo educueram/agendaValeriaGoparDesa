@@ -2076,6 +2076,47 @@ app.get('/api/consulta-fecha-actual', (req, res) => {
 });
 
 /**
+ * ENDPOINT: Verificar cliente recurrente
+ */
+app.post('/api/verificar-cliente', async (req, res) => {
+  try {
+    console.log('🔍 === VERIFICACIÓN DE CLIENTE RECURRENTE ===');
+    console.log('Body recibido:', JSON.stringify(req.body, null, 2));
+
+    const { telefono } = req.body;
+
+    if (!telefono) {
+      return res.json({
+        success: false,
+        error: 'Teléfono no proporcionado',
+        pacientes: []
+      });
+    }
+
+    console.log(`📞 Buscando cliente con teléfono: ${telefono}`);
+
+    // Buscar en Google Sheets (la función ya normaliza el número)
+    const pacientesEncontrados = await consultaDatosPacientePorTelefono(telefono);
+    
+    console.log(`✅ Resultados encontrados: ${pacientesEncontrados.length}`);
+
+    return res.json({
+      success: true,
+      pacientes: pacientesEncontrados,
+      cantidad: pacientesEncontrados.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error verificando cliente:', error.message);
+    return res.json({
+      success: false,
+      error: error.message,
+      pacientes: []
+    });
+  }
+});
+
+/**
  * ENDPOINT: Agendar cita (LÓGICA ORIGINAL)
  * Migrado desde handleSchedule del código de Google Apps Script
  */

@@ -124,7 +124,7 @@ async function saveClientDataOriginal(clientData) {
       timestamp,                           // FECHA_REGISTRO
       clientData.codigoReserva || '',      // CODIGO_RESERVA
       clientData.clientName || '',         // NOMBRE_CLIENTE  
-      clientData.clientPhone || '',        // TELEFONO
+      clientData.clientPhone || '',        // TELEFONO (SIN NORMALIZAR - GUARDAR COMO VIENE)
       clientData.clientEmail || '',        // EMAIL
       clientData.profesionalName || '',    // ESPECIALISTA
       clientData.date || '',               // FECHA_CITA
@@ -412,20 +412,27 @@ async function consultaDatosPacientePorTelefono(numeroTelefono) {
     // Eliminar caracteres no numéricos
     normalizedSearchPhone = normalizedSearchPhone.replace(/\D/g, '');
     
-    // Si empieza con 521, eliminar el 1 extra (ej: +5214495847679 -> 524495847679)
+    // LÓGICA MEJORADA: Buscar ambas variantes (con y sin el "1" extra)
+    let searchVariants = [];
+    
     if (normalizedSearchPhone.startsWith('521')) {
-      normalizedSearchPhone = '52' + normalizedSearchPhone.substring(3);
-    }
-    // Si empieza con 52, mantenerlo
-    else if (normalizedSearchPhone.startsWith('52')) {
-      normalizedSearchPhone = '52' + normalizedSearchPhone.substring(2);
-    }
-    // Si son 10 dígitos (sin lada), agregar 52
-    else if (normalizedSearchPhone.length === 10) {
-      normalizedSearchPhone = '52' + normalizedSearchPhone;
+      // Si viene +521..., buscar también como +52...
+      const withoutOne = '52' + normalizedSearchPhone.substring(3);
+      searchVariants.push(withoutOne, normalizedSearchPhone);
+    } else if (normalizedSearchPhone.startsWith('52')) {
+      // Si viene +52..., buscar también como +521...
+      const withOne = '521' + normalizedSearchPhone.substring(2);
+      searchVariants.push(normalizedSearchPhone, withOne);
+    } else if (normalizedSearchPhone.length === 10) {
+      // Si son 10 dígitos, buscar ambas variantes
+      searchVariants.push('52' + normalizedSearchPhone, '521' + normalizedSearchPhone);
+    } else {
+      // Para otros casos, buscar el número tal como viene
+      searchVariants.push(normalizedSearchPhone);
     }
     
     console.log(`📞 Teléfono normalizado para búsqueda: ${normalizedSearchPhone}`);
+    console.log(`🔍 Variantes de búsqueda: ${searchVariants.join(', ')}`);
     
     const pacientesEncontrados = [];
     
