@@ -617,18 +617,12 @@ function mockFindAvailableSlots(calendarId, date, durationMinutes, hours) {
     };
   }
   
-  // HORARIOS NORMALES (Lunes a Viernes)
-  const workingHours = config.workingHours.forceFixedSchedule ? {
-    start: config.workingHours.startHour,
-    end: config.workingHours.endHour,
-    lunchStart: config.workingHours.lunchStartHour,
-    lunchEnd: config.workingHours.lunchEndHour,
-    hasLunch: true
-  } : {
-      start: hours?.start || 10,
-    end: hours?.end || 19,
-    lunchStart: 14,  // 2 PM fijo
-    lunchEnd: 15,    // 3 PM fijo
+  // HORARIOS NORMALES (Lunes a Viernes): SI O SI 10 AM a 7 PM
+  const workingHours = {
+    start: 10,  // FORZADO: Siempre 10 AM
+    end: 19,    // FORZADO: Siempre 7 PM (19:00)
+    lunchStart: config.workingHours.lunchStartHour || 14,  // 2 PM
+    lunchEnd: config.workingHours.lunchEndHour || 15,      // 3 PM
     hasLunch: true
   };
   
@@ -859,15 +853,15 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       }));
     }
     
-    // NUEVA LÓGICA: Consultar los próximos 4-5 días desde la fecha solicitada
+    // NUEVA LÓGICA: Consultar solo el día solicitado + 2 días más (total 3 días)
     // Si la fecha solicitada es hoy o en el futuro, empezar desde ahí
     // Si es en el pasado, empezar desde hoy
     const datesToCheck = [];
-    const maxDaysToCheck = 7; // Revisar hasta 7 días para obtener 4-5 días válidos (excluyendo domingos)
-    const minDaysRequired = 4; // Mínimo 4 días válidos
+    const maxDaysToCheck = 5; // Revisar hasta 5 días para obtener 3 días válidos (excluyendo domingos)
+    const totalDaysRequired = 3; // Total: día solicitado + 2 días más
     
     let daysAdded = 0;
-    for (let i = 0; i < maxDaysToCheck && daysAdded < minDaysRequired; i++) {
+    for (let i = 0; i < maxDaysToCheck && daysAdded < totalDaysRequired; i++) {
       const checkDate = startDate.clone().add(i, 'days');
       const jsDay = checkDate.toDate().getDay();
       
@@ -885,29 +879,9 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       daysAdded++;
     }
     
-    // Si aún no tenemos suficientes días, intentar agregar uno más (hasta 5 días totales)
-    if (daysAdded < 5) {
-      for (let i = datesToCheck.length; i < maxDaysToCheck && daysAdded < 5; i++) {
-        const checkDate = startDate.clone().add(i, 'days');
-        const jsDay = checkDate.toDate().getDay();
-        
-        if (jsDay === 0) {
-          continue;
-        }
-        
-        datesToCheck.push({
-          date: checkDate.toDate(),
-          label: 'siguiente',
-          emoji: '📆',
-          priority: daysAdded + 1
-        });
-        daysAdded++;
-      }
-    }
-    
-    console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS ===`);
+    console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS (DÍA SOLICITADO + 2 MÁS) ===`);
     console.log(`📅 Fecha inicial: ${startDate.format('YYYY-MM-DD')} (${startDate.format('dddd')})`);
-    console.log(`📅 Días a consultar: ${datesToCheck.length}`);
+    console.log(`📅 Días a consultar: ${datesToCheck.length} (solo día solicitado + 2 días más)`);
     datesToCheck.forEach((day, idx) => {
       const dayMoment = moment(day.date).tz(config.timezone.default);
       console.log(`   ${idx + 1}. ${dayMoment.format('YYYY-MM-DD')} (${dayMoment.format('dddd')})`);
@@ -955,10 +929,10 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
             };
             console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
           } else {
-            // DÍAS NORMALES: Horario de 10 AM a 7 PM
+            // DÍAS NORMALES: SI O SI 10 AM a 7 PM
             correctedHours = {
-              start: Math.max(workingHours.start, 10), // Mínimo 10 AM
-              end: Math.min(workingHours.end, 19), // Máximo 7 PM (19:00)
+              start: 10, // FORZADO: Siempre 10 AM
+              end: 19,   // FORZADO: Siempre 7 PM (19:00)
               dayName: workingHours.dayName
             };
           }
@@ -977,6 +951,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
           let availableSlots = [];
           
           try {
+            
             // Intentar usar Google Calendar API real
             const slotResult = await findAvailableSlots(calendarId, dayInfo.date, parseInt(serviceDuration), correctedHours);
             
@@ -1117,10 +1092,10 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
         };
         console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
       } else {
-        // DÍAS NORMALES: Horario de 10 AM a 7 PM
+        // DÍAS NORMALES: SI O SI 10 AM a 7 PM
         correctedHours = {
-          start: Math.max(workingHours.start, 10), // Mínimo 10 AM
-          end: Math.min(workingHours.end, 19), // Máximo 7 PM (19:00)
+          start: 10, // FORZADO: Siempre 10 AM
+          end: 19,   // FORZADO: Siempre 7 PM (19:00)
           dayName: workingHours.dayName
         };
       }
