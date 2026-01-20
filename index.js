@@ -84,10 +84,27 @@ const patientCache = new Map();
 
 /**
  * Normalizar número de teléfono para búsqueda
+ * Convierte +5214495847679 -> 4495847679
  */
 function normalizePhone(phone) {
   if (!phone) return '';
-  return phone.replace(/[\s\-\(\)\.]/g, '').replace(/^52/, '');
+  // Eliminar todos los caracteres no numéricos
+  let cleaned = phone.replace(/\D/g, '');
+  
+  // Si empieza con 521, eliminar el 1 extra
+  if (cleaned.startsWith('521')) {
+    cleaned = '52' + cleaned.substring(3);
+  }
+  // Si empieza con 52, mantenerlo
+  else if (cleaned.startsWith('52')) {
+    cleaned = '52' + cleaned.substring(2);
+  }
+  // Si son 10 dígitos (sin lada), agregar 52
+  else if (cleaned.length === 10) {
+    cleaned = '52' + cleaned;
+  }
+  
+  return cleaned;
 }
 
 /**

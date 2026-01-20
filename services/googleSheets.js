@@ -407,7 +407,24 @@ async function consultaDatosPacientePorTelefono(numeroTelefono) {
     }
 
     // Normalizar el número de búsqueda (quitar espacios, guiones, etc.)
-    const normalizedSearchPhone = numeroTelefono.replace(/[\s\-\(\)\.]/g, '');
+    let normalizedSearchPhone = numeroTelefono.replace(/[\s\-\(\)\.]/g, '');
+    
+    // Eliminar caracteres no numéricos
+    normalizedSearchPhone = normalizedSearchPhone.replace(/\D/g, '');
+    
+    // Si empieza con 521, eliminar el 1 extra (ej: +5214495847679 -> 524495847679)
+    if (normalizedSearchPhone.startsWith('521')) {
+      normalizedSearchPhone = '52' + normalizedSearchPhone.substring(3);
+    }
+    // Si empieza con 52, mantenerlo
+    else if (normalizedSearchPhone.startsWith('52')) {
+      normalizedSearchPhone = '52' + normalizedSearchPhone.substring(2);
+    }
+    // Si son 10 dígitos (sin lada), agregar 52
+    else if (normalizedSearchPhone.length === 10) {
+      normalizedSearchPhone = '52' + normalizedSearchPhone;
+    }
+    
     console.log(`📞 Teléfono normalizado para búsqueda: ${normalizedSearchPhone}`);
     
     const pacientesEncontrados = [];
