@@ -177,8 +177,8 @@ Te recordamos que tienes una cita programada para *mañana*:
 ⚠️ *¿Deseas confirmar tu asistencia?*
 
 Responde con:
-• ✅ *CONFIRMAR* - Para confirmar tu asistencia
-• 🔄 *REAGENDAR* - Si necesitas cambiar la fecha/hora
+• 1️⃣ *CONFIRMAR* - Para confirmar tu asistencia
+• 2️⃣ *REAGENDAR* - Si necesitas cambiar la fecha/hora
 
 📍 ${config.business.address}
 
@@ -205,8 +205,8 @@ function generateWhatsAppMessage12h(appointment) {
     `⚠️ *¿Deseas confirmar tu asistencia?*
 
 Responde con:
-• ✅ *CONFIRMAR* - Para confirmar tu asistencia
-• 🔄 *REAGENDAR* - Si necesitas cambiar la fecha/hora`;
+• 1️⃣ *CONFIRMAR* - Para confirmar tu asistencia
+• 2️⃣ *REAGENDAR* - Si necesitas cambiar la fecha/hora`;
   
   return `🔔 *Recordatorio de Cita*
 
@@ -239,7 +239,7 @@ function generateWhatsAppMessage15min(appointment) {
     `⚠️ *¡IMPORTANTE! Tu cita aún no está confirmada*
 
 Responde con:
-• ✅ *CONFIRMAR* - Para confirmar tu asistencia ahora`;
+• 1️⃣ *CONFIRMAR* - Para confirmar tu asistencia ahora`;
   
   return `⏰ *¡Tu cita es en 15 minutos!*
 
