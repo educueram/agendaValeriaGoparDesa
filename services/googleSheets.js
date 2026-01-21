@@ -412,20 +412,19 @@ async function consultaDatosPacientePorTelefono(numeroTelefono) {
     // Eliminar caracteres no numéricos
     normalizedSearchPhone = normalizedSearchPhone.replace(/\D/g, '');
     
-    // LÓGICA MEJORADA: Buscar ambas variantes (con y sin el "1" extra)
+    // LÓGICA ADECUADA: Siempre buscar con formato +521 (con el "1")
     let searchVariants = [];
     
     if (normalizedSearchPhone.startsWith('521')) {
-      // Si viene +521..., buscar también como +52...
-      const withoutOne = '52' + normalizedSearchPhone.substring(3);
-      searchVariants.push(withoutOne, normalizedSearchPhone);
+      // Si viene +521..., usar tal como está
+      searchVariants.push(normalizedSearchPhone);
     } else if (normalizedSearchPhone.startsWith('52')) {
-      // Si viene +52..., buscar también como +521...
+      // Si viene +52..., convertir a +521...
       const withOne = '521' + normalizedSearchPhone.substring(2);
-      searchVariants.push(normalizedSearchPhone, withOne);
+      searchVariants.push(withOne);
     } else if (normalizedSearchPhone.length === 10) {
-      // Si son 10 dígitos, buscar ambas variantes
-      searchVariants.push('52' + normalizedSearchPhone, '521' + normalizedSearchPhone);
+      // Si son 10 dígitos, agregar +521
+      searchVariants.push('521' + normalizedSearchPhone);
     } else {
       // Para otros casos, buscar el número tal como viene
       searchVariants.push(normalizedSearchPhone);
@@ -441,11 +440,33 @@ async function consultaDatosPacientePorTelefono(numeroTelefono) {
       const rowPhone = data[i][3] || '';
       const normalizedRowPhone = rowPhone.toString().replace(/[\s\-\(\)\.]/g, '');
       
-      // Verificar si el número coincide (búsqueda exacta o si uno contiene al otro)
-      if (normalizedRowPhone && 
-          (normalizedRowPhone === normalizedSearchPhone || 
-           normalizedRowPhone.includes(normalizedSearchPhone) ||
-           normalizedSearchPhone.includes(normalizedRowPhone))) {
+      // Eliminar caracteres no numéricos del teléfono de la fila
+      const normalizedRowPhoneNumbersOnly = normalizedRowPhone.replace(/\D/g, '');
+      
+      // Verificar si el número coincide con ALGUNA de las variantes de búsqueda
+      const foundMatch = searchVariants.some(variant => {
+        // Eliminar caracteres no numéricos de ambas variantes para comparación limpia
+        const variantNumbersOnly = variant.replace(/\D/g, '');
+        const rowNumbersOnly = normalizedRowPhoneNumbersOnly;
+        
+        console.log(`   Comparando: ${rowNumbersOnly} vs ${variantNumbersOnly}`);
+        
+        // Coincidencia exacta
+        if (rowNumbersOnly === variantNumbersOnly) {
+          console.log(`   ✅ Coincidencia exacta encontrada`);
+          return true;
+        }
+        
+        // Coincidencia por últimos 10 dígitos
+        if (rowNumbersOnly.slice(-10) === variantNumbersOnly.slice(-10)) {
+          console.log(`   ✅ Coincidencia por últimos 10 dígitos`);
+          return true;
+        }
+        
+        return false;
+      });
+      
+      if (foundMatch) {
         
         const pacienteData = {
           fechaRegistro: data[i][0] || '',
