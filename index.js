@@ -2058,6 +2058,73 @@ app.get('/api/consulta-fecha-actual', (req, res) => {
 });
 
 /**
+ * ENDPOINT: Reconocer cliente (reconocimiento silencioso)
+ * Verifica si un teléfono existe en la base de datos sin revelar el proceso
+ */
+app.post('/api/reconocer-cliente', async (req, res) => {
+  try {
+    console.log('🔍 === RECONOCIMIENTO SILENCIOSO DE CLIENTE ===');
+    console.log('Body recibido:', JSON.stringify(req.body, null, 2));
+
+    const { telefono } = req.body;
+
+    if (!telefono) {
+      return res.json({
+        success: false,
+        existeCliente: false,
+        datosCliente: null,
+        error: 'Teléfono no proporcionado'
+      });
+    }
+
+    console.log(`📞 Buscando cliente con teléfono: ${telefono}`);
+
+    // Buscar en Google Sheets (la función ya normaliza el número)
+    const pacientesEncontrados = await consultaDatosPacientePorTelefono(telefono);
+    
+    console.log(`✅ Resultados encontrados: ${pacientesEncontrados.length}`);
+
+    if (pacientesEncontrados && pacientesEncontrados.length > 0) {
+      const pacienteMasReciente = pacientesEncontrados[0];
+      
+      console.log('✅ Cliente existente reconocido silenciosamente');
+      console.log(`   - Nombre: ${pacienteMasReciente.nombreCompleto}`);
+      console.log(`   - Email: ${pacienteMasReciente.correoElectronico}`);
+      
+      // Guardar en caché para uso futuro
+      savePatientInfo(telefono, pacienteMasReciente.nombreCompleto, pacienteMasReciente.correoElectronico);
+      
+      return res.json({
+        success: true,
+        existeCliente: true,
+        datosCliente: {
+          nombreCompleto: pacienteMasReciente.nombreCompleto,
+          correoElectronico: pacienteMasReciente.correoElectronico,
+          telefono: pacienteMasReciente.telefono || telefono
+        }
+      });
+    } else {
+      console.log('⚠️ Cliente nuevo no encontrado en la base de datos');
+      
+      return res.json({
+        success: true,
+        existeCliente: false,
+        datosCliente: null
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error en reconocimiento de cliente:', error.message);
+    return res.json({
+      success: false,
+      existeCliente: false,
+      datosCliente: null,
+      error: error.message
+    });
+  }
+});
+
+/**
  * ENDPOINT: Verificar cliente recurrente
  */
 app.post('/api/verificar-cliente', async (req, res) => {
@@ -2173,28 +2240,228 @@ app.post('/api/agenda-cita-inteligente', async (req, res) => {
       });
     }
 
-    // Continuar con el resto del flujo de agendamiento original...
-    console.log('📋 === PROCESANDO CITA ===');
-    console.log(`   - Cliente: ${clientName}`);
-    console.log(`   - Teléfono: ${clientPhone}`);
-    console.log(`   - Email: ${clientEmail}`);
-    console.log(`   - Servicio: ${serviceNameFromBot}`);
-    console.log(`   - Fecha: ${date}`);
-    console.log(`   - Hora: ${time}`);
-    console.log(`   - Cliente Existente: ${esClienteExistente}`);
+    // PASO 2: OBTENER CONFIGURACIÓN (lógica original)
+    let sheetData;
+    try {
+      sheetData = await getSheetData();
+      console.log('✅ Configuración obtenida correctamente');
+    } catch (error) {
+      console.error('❌ Error obteniendo configuración:', error.message);
+      return res.json({
+        success: false,
+        error: 'Error obteniendo configuración: ' + error.message,
+        requiresData: !esClienteExistente
+      });
+    }
 
-    // Aquí continuaría toda la lógica original de agendamiento...
-    // [El resto del código sería el mismo que el endpoint original]
+    console.log('=== BÚSQUEDA EN SHEETS ===');
+    const calendarId = findData(calendarNumber, sheetData.calendars, 0, 1);
+    console.log('calendarId encontrado:', calendarId);
+    if (!calendarId) {
+      console.log(`❌ ERROR: Calendario no encontrado para número: ${calendarNumber}`);
+      return res.json({
+        success: false,
+        error: 'El calendario solicitado no fue encontrado',
+        requiresData: !esClienteExistente
+      });
+    }
+
+    const profesionalName = findData(calendarNumber, sheetData.calendars, 0, 2);
+    const serviceDuration = findData(serviceNumber, sheetData.services, 0, 1);
+
+    // Obtener nombre del servicio (lógica original)
+    let serviceName = serviceNameFromBot;
+    if (!serviceName) {
+      const serviceMap = {
+        1: 'Consulta de valoración',
+        2: 'Cita de seguimiento'
+      };
+      serviceName = serviceMap[serviceNumber] || 'Servicio Desconocido';
+      console.log('⚠️ Bot no envió serviceName, usando mapeo backup:', serviceName);
+    } else {
+      console.log('✅ Bot envió serviceName:', serviceName);
+    }
+
+    if (!serviceDuration) {
+      console.log(`❌ ERROR: Servicio no encontrado para número: ${serviceNumber}`);
+      return res.json({
+        success: false,
+        error: 'El servicio solicitado no fue encontrado',
+        requiresData: !esClienteExistente
+      });
+    }
+
+    console.log(`✅ Calendar ID: ${calendarId}, Service Duration: ${serviceDuration} min, Service: ${serviceName}`);
+
+    // PASO 4: VERIFICAR DISPONIBILIDAD DEL HORARIO
+    console.log('=== VERIFICANDO DISPONIBILIDAD DEL HORARIO ===');
+    
+    try {
+      // Parsear la fecha y hora para verificar disponibilidad
+      const appointmentDateTime = moment.tz(`${date} ${time}`, 'YYYY-MM-DD HH:mm', config.timezone.default);
+      
+      // Obtener horarios laborales para ese día
+      const dayOfWeek = appointmentDateTime.day(); // 0 = Domingo, 1 = Lunes, etc.
+      const sheetDay = (dayOfWeek === 0) ? 7 : dayOfWeek; // Convertir domingo de 0 a 7
+      const workingHours = findWorkingHours(calendarNumber, sheetDay, sheetData.hours);
+      
+      if (!workingHours) {
+        console.log(`❌ ERROR: No hay horarios laborales para el día ${sheetDay}`);
+        return res.json({
+          success: false,
+          error: 'No hay horarios laborales para el día seleccionado',
+          requiresData: !esClienteExistente
+        });
+      }
+
+      // Verificar si el horario solicitado está dentro del rango laboral
+      const requestedHour = parseInt(time.split(':')[0]);
+      if (requestedHour < workingHours.start || requestedHour >= workingHours.end) {
+        console.log(`❌ ERROR: Horario solicitado (${requestedHour}) fuera de rango laboral (${workingHours.start}-${workingHours.end})`);
+        return res.json({
+          success: false,
+          error: `El horario solicitado no está dentro del horario laboral (${workingHours.start}:00 - ${workingHours.end}:00)`,
+          requiresData: !esClienteExistente
+        });
+      }
+
+      // Verificar disponibilidad real en Google Calendar
+      const availableSlots = await findAvailableSlots(calendarId, appointmentDateTime.toDate(), parseInt(serviceDuration), workingHours);
+      
+      if (!availableSlots.includes(time)) {
+        console.log(`❌ ERROR: Horario ${time} no disponible`);
+        console.log(`   Slots disponibles: [${availableSlots.join(', ')}]`);
+        return res.json({
+          success: false,
+          error: `El horario ${time} ya no está disponible. Horarios disponibles: ${availableSlots.join(', ')}`,
+          requiresData: !esClienteExistente
+        });
+      }
+
+      console.log(`✅ Horario ${time} disponible para agendar`);
+
+    } catch (availabilityError) {
+      console.error('❌ Error verificando disponibilidad:', availabilityError.message);
+      return res.json({
+        success: false,
+        error: 'Error verificando disponibilidad: ' + availabilityError.message,
+        requiresData: !esClienteExistente
+      });
+    }
+
+    // PASO 5: CREAR EVENTO EN GOOGLE CALENDAR
+    console.log('=== CREANDO EVENTO EN GOOGLE CALENDAR ===');
+    let eventId;
+    let reservationCode;
+    
+    try {
+      // Generar código de reserva único
+      reservationCode = generateUniqueReservationCode();
+      console.log(`🎟️ Código de reserva generado: ${reservationCode}`);
+      
+      // Crear evento en Google Calendar
+      const eventResult = await createEventOriginal(
+        calendarId,
+        date,
+        time,
+        parseInt(serviceDuration),
+        clientName,
+        clientPhone,
+        clientEmail,
+        serviceName,
+        reservationCode
+      );
+      
+      eventId = eventResult.eventId;
+      console.log(`✅ Evento creado en Google Calendar con ID: ${eventId}`);
+
+    } catch (calendarError) {
+      console.error('❌ Error creando evento en Google Calendar:', calendarError.message);
+      return res.json({
+        success: false,
+        error: 'Error creando evento en calendario: ' + calendarError.message,
+        requiresData: !esClienteExistente
+      });
+    }
+
+    // PASO 6: GUARDAR EN GOOGLE SHEETS
+    console.log('=== GUARDANDO DATOS EN GOOGLE SHEETS ===');
+    
+    try {
+      await saveClientDataOriginal(
+        clientName,
+        clientPhone,
+        clientEmail,
+        date,
+        time,
+        serviceName,
+        profesionalName,
+        reservationCode,
+        eventId,
+        calendarId
+      );
+      console.log('✅ Datos guardados en Google Sheets');
+
+    } catch (sheetsError) {
+      console.error('❌ Error guardando en Google Sheets:', sheetsError.message);
+      
+      // Intentar eliminar el evento del calendario ya que no se pudo guardar en sheets
+      try {
+        await cancelEventByReservationCodeOriginal(reservationCode, calendarId);
+        console.log('🧹 Evento eliminado del calendario debido a fallo en sheets');
+      } catch (rollbackError) {
+        console.error('❌ Error eliminando evento del calendario:', rollbackError.message);
+      }
+      
+      return res.json({
+        success: false,
+        error: 'Error guardando datos: ' + sheetsError.message,
+        requiresData: !esClienteExistente
+      });
+    }
+
+    // PASO 7: ENVIAR CORREO DE CONFIRMACIÓN
+    console.log('=== ENVIANDO CORREO DE CONFIRMACIÓN ===');
+    
+    try {
+      await sendAppointmentConfirmation(
+        clientName,
+        clientEmail,
+        date,
+        time,
+        serviceName,
+        profesionalName,
+        reservationCode
+      );
+      console.log('✅ Correo de confirmación enviado');
+
+    } catch (emailError) {
+      console.error('⚠️ Error enviando correo de confirmación:', emailError.message);
+      // No fallar el proceso si el correo no se envía
+    }
+
+    // PASO 8: RESPUESTA EXITOSA
+    console.log('=== CITA AGENDADA EXITOSAMENTE ===');
+    
+    const time12h = formatTimeTo12Hour(time);
+    const dateFormatted = formatDateToSpanishPremium(appointmentDateTime.toDate());
+    
+    const successMessage = esClienteExistente
+      ? `✅ ¡Cita agendada usando tus datos existentes! ✈️\n\n📅 Detalles de tu cita:\n• Fecha: ${dateFormatted}\n• Hora: ${time12h}\n• Profesional: ${profesionalName}\n• Servicio: ${serviceName}\n\n🎟️ TU CÓDIGO DE RESERVA ES: ${reservationCode}\n\n¡Gracias por confiar en nosotros! 🌟`
+      : `✅ ¡Cita confirmada! ✈️\n\n📅 Detalles de tu cita:\n• Fecha: ${dateFormatted}\n• Hora: ${time12h}\n• Profesional: ${profesionalName}\n• Servicio: ${serviceName}\n\n🎟️ TU CÓDIGO DE RESERVA ES: ${reservationCode}\n\n¡Gracias por confiar en nosotros! 🌟`;
 
     return res.json({
       success: true,
-      message: esClienteExistente 
-        ? 'Cita agendada usando tus datos existentes'
-        : 'Cita agendada correctamente',
+      respuesta: successMessage,
+      id_cita: reservationCode,
       esClienteExistente: esClienteExistente,
       clientName: clientName,
       clientEmail: clientEmail,
-      clientPhone: clientPhone
+      clientPhone: clientPhone,
+      fecha: date,
+      hora: time12h,
+      profesional: profesionalName,
+      servicio: serviceName
     });
 
   } catch (error) {
