@@ -13,8 +13,8 @@ const { initializeAuth, getCalendarInstance } = require('./services/googleAuth')
 const { getSheetData, findData, findWorkingHours, updateClientStatus, updateClientAppointmentDateTime, getClientDataByReservationCode, saveClientDataOriginal, ensureClientsSheet, consultaDatosPacientePorTelefono } = require('./services/googleSheets');
 const { findAvailableSlots, cancelEventByReservationCodeOriginal, createEventOriginal, createEventWithCustomId, generateUniqueReservationCode, formatTimeTo12Hour } = require('./services/googleCalendar');
 const { sendAppointmentConfirmation, sendNewAppointmentNotification, sendRescheduledAppointmentConfirmation, emailServiceReady } = require('./services/emailService');
-const { getUpcomingAppointments24h, getUpcomingAppointments12h, getUpcomingAppointments15min, sendEmailReminder24h, sendEmailReminder12h, sendEmailReminder15min } = require('./services/reminderService');
-const { sendWhatsAppReminder24h, sendWhatsAppReminder12h, sendWhatsAppReminder15min } = require('./services/whatsappService');
+const { getUpcomingAppointments24h, sendEmailReminder24h } = require('./services/reminderService');
+const { sendWhatsAppReminder24h } = require('./services/whatsappService');
 
 const app = express();
 const PORT = config.server.port;
@@ -1814,28 +1814,10 @@ app.post('/api/confirma-cita', async (req, res) => {
     }
 
     // PASO 5: Preparar respuesta con confirmación
-    const fechaFormateada = moment.tz(clientData.date, config.timezone.default).format('dddd, D [de] MMMM [de] YYYY');
-    const horaFormateada = formatTimeTo12Hour(clientData.time);
-
     const finalResponse = {
-      respuesta: `✅ ¡Cita confirmada exitosamente! 🎉
+      respuesta: `✅ ¡Tu asistencia ha sido confirmada! 🎉
 
-📅 Detalles de tu cita:
-• Fecha: ${fechaFormateada}
-• Hora: ${horaFormateada}
-• Cliente: ${clientData.clientName}
-• Servicio: ${clientData.serviceName}
-• Especialista: ${clientData.profesionalName}
-
-🎟️ Código de reserva: ${codigo_reserva.toUpperCase()}
-
-⚠️ Recuerda:
-• Llega 10 minutos antes
-• Trae tu código de reserva
-
-📍 ${config.business.address}
-
-¡Te esperamos! 🌟`
+Nos alegra saber que nos visitarás pronto. ¡Te esperamos en tu sesión! 🌟`
     };
 
     console.log('🎉 === CONFIRMACIÓN EXITOSA ===');
@@ -4334,10 +4316,10 @@ const getServerUrl = () => {
 
 /**
  * Cron Job: Verificar citas próximas en 24 horas
- * Se ejecuta cada hora de lunes a domingo de 9 AM a 7 PM
+ * Se ejecuta una vez al día a las 9 AM
  * Envía notificación 24h antes y permite confirmación
  */
-cron.schedule('0 9-19 * * *', async () => {
+cron.schedule('0 9 * * *', async () => {
   try {
     console.log('⏰ === CRON: VERIFICANDO CITAS PRÓXIMAS (24H) ===');
     console.log(`🕒 Ejecutado a las: ${moment().tz(config.timezone.default).format('YYYY-MM-DD HH:mm:ss')}`);
@@ -4383,97 +4365,11 @@ cron.schedule('0 9-19 * * *', async () => {
   }
 });
 
-/**
- * Cron Job: Verificar citas próximas en 12 horas
- * Se ejecuta cada hora de lunes a domingo de 9 AM a 7 PM
- * Envía siempre como recordatorio (incluso si ya está confirmada)
- */
-cron.schedule('0 9-19 * * *', async () => {
-  try {
-    console.log('⏰ === CRON: VERIFICANDO CITAS PRÓXIMAS (12H) ===');
-    console.log(`🕒 Ejecutado a las: ${moment().tz(config.timezone.default).format('YYYY-MM-DD HH:mm:ss')}`);
-    
-    const appointments = await getUpcomingAppointments12h();
-    
-    if (appointments.length === 0) {
-      console.log('✅ No hay citas próximas en las siguientes 12 horas');
-      return;
-    }
-    
-    console.log(`📊 Citas encontradas: ${appointments.length}`);
-    
-    // Enviar recordatorios por email y WhatsApp (siempre, incluso si está confirmada)
-    for (const appointment of appointments) {
-      console.log(`\n📤 Enviando recordatorio 12h a: ${appointment.clientName}`);
-      console.log(`🎟️ Código de reserva: ${appointment.codigoReserva}`);
-      console.log(`📊 Estado actual: ${appointment.estado}`);
-      
-      // Enviar email
-      if (appointment.clientEmail && appointment.clientEmail !== 'Sin Email') {
-        await sendEmailReminder12h(appointment);
-      }
-      
-      // Enviar WhatsApp
-      if (appointment.clientPhone) {
-        await sendWhatsAppReminder12h(appointment);
-      }
-    }
-    
-    console.log('✅ Recordatorios de 12h enviados exitosamente');
-    
-  } catch (error) {
-    console.error('❌ Error en cron de 12h:', error.message);
-  }
-});
 
-/**
- * Cron Job: Verificar citas próximas en 15 minutos
- * Se ejecuta cada 15 minutos de lunes a sábado
- * Envía siempre como recordatorio (incluso si ya está confirmada)
- * Si no está confirmada, incluye opción de confirmación
- */
-cron.schedule('*/15 * * * 1-6', async () => {
-  try {
-    console.log('⏰ === CRON: VERIFICANDO CITAS PRÓXIMAS (15MIN) ===');
-    console.log(`🕒 Ejecutado a las: ${moment().tz(config.timezone.default).format('YYYY-MM-DD HH:mm:ss')}`);
-    
-    const appointments = await getUpcomingAppointments15min();
-    
-    if (appointments.length === 0) {
-      console.log('✅ No hay citas próximas en los siguientes 15 minutos');
-      return;
-    }
-    
-    console.log(`📊 Citas encontradas: ${appointments.length}`);
-    
-    // Enviar recordatorios por email y WhatsApp (siempre, incluso si está confirmada)
-    for (const appointment of appointments) {
-      console.log(`\n📤 Enviando recordatorio urgente a: ${appointment.clientName}`);
-      console.log(`🎟️ Código de reserva: ${appointment.codigoReserva}`);
-      console.log(`📊 Estado: ${appointment.estado}`);
-      
-      // Enviar email
-      if (appointment.clientEmail && appointment.clientEmail !== 'Sin Email') {
-        await sendEmailReminder15min(appointment);
-      }
-      
-      // Enviar WhatsApp
-      if (appointment.clientPhone) {
-        await sendWhatsAppReminder15min(appointment);
-      }
-    }
-    
-    console.log('✅ Recordatorios de 15min enviados exitosamente');
-    
-  } catch (error) {
-    console.error('❌ Error en cron de 15min:', error.message);
-  }
-});
 
-console.log('✅ Cron jobs de recordatorios ACTIVADOS');
-console.log('   - Recordatorio 24h: ACTIVADO (cada hora, 9 AM - 7 PM)');
-console.log('   - Recordatorio 12h: ACTIVADO (cada hora, 9 AM - 7 PM)');
-console.log('   - Recordatorio 15min: ACTIVADO (cada 15 minutos, lunes-sábado)');
+console.log('✅ Cron job de recordatorios ACTIVADO');
+console.log('   - Recordatorio 24h: ACTIVADO (una vez al día a las 9 AM)');
+console.log('   - Recordatorios 12h y 15min: DESACTIVADOS');
 
 app.listen(PORT, () => {
   const serverUrl = getServerUrl();
