@@ -2173,6 +2173,88 @@ app.post('/api/verificar-cliente', async (req, res) => {
 });
 
 /**
+ * ENDPOINT: Verificar cliente después de seleccionar hora
+ * Detecta si es recurrente o nuevo y genera el mensaje apropiado
+ */
+app.post('/api/verificar-cliente-seleccion-hora', async (req, res) => {
+  try {
+    console.log('🔍 === VERIFICACIÓN DE CLIENTE DESPUÉS DE SELECCIÓN DE HORA ===');
+    console.log('Body recibido:', JSON.stringify(req.body, null, 2));
+
+    const { telefono, horaSeleccionada, fechaSeleccionada, servicio } = req.body;
+
+    if (!telefono) {
+      return res.json({
+        success: false,
+        error: 'Teléfono no proporcionado',
+        tipoCliente: 'desconocido'
+      });
+    }
+
+    console.log(`📞 Buscando cliente con teléfono: ${telefono}`);
+    console.log(`⏰ Hora seleccionada: ${horaSeleccionada}`);
+    console.log(`📅 Fecha seleccionada: ${fechaSeleccionada}`);
+
+    // Buscar en Google Sheets
+    const pacientesEncontrados = await consultaDatosPacientePorTelefono(telefono);
+    
+    console.log(`✅ Resultados encontrados: ${pacientesEncontrados.length}`);
+
+    if (pacientesEncontrados && pacientesEncontrados.length > 0) {
+      const pacienteMasReciente = pacientesEncontrados[0];
+      
+      console.log('✅ Cliente recurrente detectado');
+      console.log(`   - Nombre: ${pacienteMasReciente.nombreCompleto}`);
+      console.log(`   - Email: ${pacienteMasReciente.correoElectronico}`);
+      
+      // Mensaje para cliente recurrente
+      const mensajeRecurrente = `¡Perfecto! Elegiste las ${horaSeleccionada} del ${fechaSeleccionada} 👍
+
+Vemos que ya has agendado con nosotros. Seguiremos utilizando tu información para agilizar el proceso.
+
+¿Confirmamos tu cita? Escribe 'sí' para agendar o 'no' para ajustar algo 😊`;
+
+      return res.json({
+        success: true,
+        tipoCliente: 'recurrente',
+        datosCliente: {
+          nombreCompleto: pacienteMasReciente.nombreCompleto,
+          correoElectronico: pacienteMasReciente.correoElectronico,
+          telefono: pacienteMasReciente.telefono || telefono
+        },
+        mensaje: mensajeRecurrente,
+        requiereDatosAdicionales: false
+      });
+      
+    } else {
+      console.log('⚠️ Cliente nuevo detectado');
+      
+      // Mensaje para cliente nuevo
+      const mensajeNuevo = `¡Perfecto! Elegiste las ${horaSeleccionada} del ${fechaSeleccionada} 👍
+
+¿Me puedes decir tu nombre para la reserva? 😊`;
+
+      return res.json({
+        success: true,
+        tipoCliente: 'nuevo',
+        datosCliente: null,
+        mensaje: mensajeNuevo,
+        requiereDatosAdicionales: true
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error en verificación de cliente:', error.message);
+    return res.json({
+      success: false,
+      error: error.message,
+      tipoCliente: 'desconocido',
+      mensaje: 'Ocurrió un error al verificar tus datos. Por favor, proporciona tu nombre para continuar 😊'
+    });
+  }
+});
+
+/**
  * ENDPOINT: Agendar cita con reconocimiento inteligente
  * Reconoce clientes existentes y no pide datos que ya tiene
  */
