@@ -2173,6 +2173,23 @@ app.post('/api/verificar-cliente', async (req, res) => {
 });
 
 /**
+ * ENDPOINT GET: Verificar que el endpoint está disponible
+ */
+app.get('/api/verificar-cliente-seleccion-hora', (req, res) => {
+  return res.json({
+    success: true,
+    message: 'Endpoint disponible. Usa POST para verificar cliente.',
+    metodo: 'POST',
+    ejemplo: {
+      telefono: '+5214495847679',
+      horaSeleccionada: '10:00 AM',
+      fechaSeleccionada: 'lunes 25 de enero',
+      servicio: 'Consulta presencial'
+    }
+  });
+});
+
+/**
  * ENDPOINT: Verificar cliente después de seleccionar hora
  * Detecta si es recurrente o nuevo y genera el mensaje apropiado
  */
@@ -2207,12 +2224,14 @@ app.post('/api/verificar-cliente-seleccion-hora', async (req, res) => {
       console.log(`   - Nombre: ${pacienteMasReciente.nombreCompleto}`);
       console.log(`   - Email: ${pacienteMasReciente.correoElectronico}`);
       
-      // Mensaje para cliente recurrente
+      // Mensaje para cliente recurrente - más directo y claro
       const mensajeRecurrente = `¡Perfecto! Elegiste las ${horaSeleccionada} del ${fechaSeleccionada} 👍
 
-Vemos que ya has agendado con nosotros. Seguiremos utilizando tu información para agilizar el proceso.
+Encontramos tus datos en nuestro sistema:
+• Nombre: ${pacienteMasReciente.nombreCompleto}
+• Correo: ${pacienteMasReciente.correoElectronico || 'No registrado'}
 
-¿Confirmamos tu cita? Escribe 'sí' para agendar o 'no' para ajustar algo 😊`;
+¿Usamos estos mismos datos para agendar tu cita? Responde 'sí' para confirmar 😊`;
 
       return res.json({
         success: true,
@@ -2223,7 +2242,8 @@ Vemos que ya has agendado con nosotros. Seguiremos utilizando tu información pa
           telefono: pacienteMasReciente.telefono || telefono
         },
         mensaje: mensajeRecurrente,
-        requiereDatosAdicionales: false
+        requiereDatosAdicionales: false,
+        puedeAgendarDirectamente: true
       });
       
     } else {
@@ -2553,7 +2573,7 @@ app.post('/api/agenda-cita-inteligente', async (req, res) => {
     const dateFormatted = formatDateToSpanishPremium(appointmentDateTime.toDate());
     
     const successMessage = esClienteExistente
-      ? `✅ ¡Cita agendada usando tus datos existentes! ✈️\n\n📅 Detalles de tu cita:\n• Fecha: ${dateFormatted}\n• Hora: ${time12h}\n• Profesional: ${profesionalName}\n• Servicio: ${serviceName}\n\n🎟️ TU CÓDIGO DE RESERVA ES: ${reservationCode}\n\n¡Gracias por confiar en nosotros! 🌟`
+      ? `✅ ¡Cita agendada exitosamente! ✈️\n\n📅 Detalles de tu cita:\n• Fecha: ${dateFormatted}\n• Hora: ${time12h}\n• Profesional: ${profesionalName}\n• Servicio: ${serviceName}\n\n🎟️ TU CÓDIGO DE RESERVA ES: ${reservationCode}\n\n¡Gracias por confiar en nosotros! Te esperamos 🌟`
       : `✅ ¡Cita confirmada! ✈️\n\n📅 Detalles de tu cita:\n• Fecha: ${dateFormatted}\n• Hora: ${time12h}\n• Profesional: ${profesionalName}\n• Servicio: ${serviceName}\n\n🎟️ TU CÓDIGO DE RESERVA ES: ${reservationCode}\n\n¡Gracias por confiar en nosotros! 🌟`;
 
     return res.json({
