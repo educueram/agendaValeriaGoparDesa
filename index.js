@@ -1558,6 +1558,13 @@ app.post('/api/reagenda-cita', async (req, res) => {
       });
     }
 
+    if (startTimeMoment.minute() !== 0) {
+      console.log('❌ ERROR: Horario con minutos no permitidos');
+      return res.json({ 
+        respuesta: '⚠️ Solo se permiten horarios en punto (por ejemplo: 10:00, 11:00, 12:00). Por favor elige una hora completa.'
+      });
+    }
+
     // VALIDACIÓN 1: No permitir fechas en el pasado
     const startOfToday = now.clone().startOf('day');
     const requestedDate = startTimeMoment.clone().startOf('day');
@@ -2299,9 +2306,26 @@ app.post('/api/agenda-cita-inteligente', async (req, res) => {
     try {
       // Parsear la fecha y hora para verificar disponibilidad
       const appointmentDateTime = moment.tz(`${date} ${time}`, 'YYYY-MM-DD HH:mm', config.timezone.default);
+
+    if (appointmentDateTime.minute() !== 0) {
+      console.log('❌ ERROR: Horario con minutos no permitidos');
+      return res.json({
+        success: false,
+        error: 'Solo se permiten horarios en punto (por ejemplo: 10:00, 11:00, 12:00).',
+        requiresData: !esClienteExistente
+      });
+    }
       
       // Obtener horarios laborales para ese día
       const dayOfWeek = appointmentDateTime.day(); // 0 = Domingo, 1 = Lunes, etc.
+    if (dayOfWeek === 0) {
+      console.log('🚫 DOMINGO - No hay servicio');
+      return res.json({
+        success: false,
+        error: 'No hay servicio los domingos. Por favor selecciona otro día (Lunes a Sábado).',
+        requiresData: !esClienteExistente
+      });
+    }
       const sheetDay = (dayOfWeek === 0) ? 7 : dayOfWeek; // Convertir domingo de 0 a 7
       const workingHours = findWorkingHours(calendarNumber, sheetDay, sheetData.hours);
       
@@ -2622,6 +2646,13 @@ app.post('/api/agenda-cita', async (req, res) => {
       return res.json({ respuesta: '⚠️ Error: El formato de fecha o hora es inválido.' });
     }
 
+    if (startTime.minute() !== 0) {
+      console.log('❌ ERROR: Horario con minutos no permitidos');
+      return res.json({
+        respuesta: '⚠️ Solo se permiten horarios en punto (por ejemplo: 10:00, 11:00, 12:00).'
+      });
+    }
+
     // NUEVA VALIDACIÓN: No permitir fechas en el pasado
     const startOfToday = now.clone().startOf('day');
     const requestedDate = startTime.clone().startOf('day');
@@ -2706,6 +2737,12 @@ app.post('/api/agenda-cita', async (req, res) => {
     if (!serviceDuration) {
       console.log(`❌ ERROR: Servicio no encontrado para número: ${serviceNumber}`);
       return res.json({ respuesta: '🚫 Error: El servicio solicitado no fue encontrado.' });
+    }
+
+    // VALIDACIÓN: Domingo no permitido
+    const dayOfWeek = startTime.day();
+    if (dayOfWeek === 0) {
+      return res.json({ respuesta: '🚫 No hay servicio los domingos. Por favor selecciona otro día (Lunes a Sábado).' });
     }
 
     // PASO 4: GENERAR CÓDIGO DE RESERVA ÚNICO
@@ -4709,16 +4746,11 @@ cron.schedule('0 9 * * *', async () => {
     
     console.log(`📊 Citas encontradas: ${appointments.length}`);
     
-    // Enviar recordatorios por email y WhatsApp
+    // Enviar recordatorios solo por WhatsApp
     for (const appointment of appointments) {
       console.log(`\n📤 Enviando recordatorio 24h a: ${appointment.clientName}`);
       console.log(`🎟️ Código de reserva: ${appointment.codigoReserva}`);
-      
-      // Enviar email
-      if (appointment.clientEmail && appointment.clientEmail !== 'Sin Email') {
-        await sendEmailReminder24h(appointment);
-      }
-      
+
       // Enviar WhatsApp
       if (appointment.clientPhone) {
         const whatsappResult = await sendWhatsAppReminder24h(appointment);
