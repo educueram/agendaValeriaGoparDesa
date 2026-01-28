@@ -1417,18 +1417,26 @@ app.post('/api/cancela-cita', async (req, res) => {
     console.log('🗑️ === INICIO CANCELACIÓN ORIGINAL ===');
     console.log('Body recibido:', JSON.stringify(req.body, null, 2));
     
-    const { action, calendar: calendarNumber, eventId: codigoReserva } = req.body;
+    const {
+      action,
+      calendar: calendarNumberRaw,
+      eventId,
+      codigo_reserva,
+      codigoReserva
+    } = req.body;
+    const codigoReservaFinal = (eventId || codigo_reserva || codigoReserva || '').toString().trim();
+    const calendarNumber = (calendarNumberRaw || '1').toString().trim();
 
     // Validar parámetros
     if (!action || action !== 'cancel') {
       return res.json({ respuesta: '⚠️ Error: Se requiere action: "cancel"' });
     }
 
-    if (!calendarNumber || !codigoReserva) {
-      return res.json({ respuesta: '⚠️ Error de cancelación: Faltan datos (calendar, eventId).' });
+    if (!codigoReservaFinal) {
+      return res.json({ respuesta: '⚠️ Error de cancelación: Falta el código de reserva (eventId/codigo_reserva).' });
     }
 
-    console.log(`📊 Parámetros: calendar=${calendarNumber}, código=${codigoReserva}`);
+    console.log(`📊 Parámetros: calendar=${calendarNumber}, código=${codigoReservaFinal}`);
 
     // Obtener datos de configuración
     let sheetData;
@@ -1450,13 +1458,13 @@ app.post('/api/cancela-cita', async (req, res) => {
     console.log(`📅 Calendar ID: ${calendarId}`);
 
     // USAR LÓGICA ORIGINAL: Cancelar por código de evento
-    const cancelResult = await cancelEventByReservationCodeOriginal(calendarId, codigoReserva);
+    const cancelResult = await cancelEventByReservationCodeOriginal(calendarId, codigoReservaFinal);
     
     if (cancelResult.success) {
       // Actualizar estado en Google Sheets
       try {
-        await updateClientStatus(codigoReserva, 'CANCELADA');
-        console.log(`✅ Estado actualizado en Google Sheets: ${codigoReserva} -> CANCELADA`);
+        await updateClientStatus(codigoReservaFinal, 'CANCELADA');
+        console.log(`✅ Estado actualizado en Google Sheets: ${codigoReservaFinal} -> CANCELADA`);
       } catch (updateError) {
         console.error('❌ Error actualizando Google Sheets:', updateError.message);
         // No fallar la cancelación por este error
@@ -4346,11 +4354,13 @@ const swaggerDocument = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['action', 'calendar', 'eventId'],
+                required: ['action', 'eventId'],
                 properties: {
                   action: { type: 'string', example: 'cancel' },
-                  calendar: { type: 'string', example: '1' },
-                  eventId: { type: 'string', example: 'ABC123' }
+                  calendar: { type: 'string', example: '1', description: 'Opcional. Por defecto: 1' },
+                  eventId: { type: 'string', example: 'ABC123' },
+                  codigo_reserva: { type: 'string', example: 'ABC123', description: 'Alias de eventId' },
+                  codigoReserva: { type: 'string', example: 'ABC123', description: 'Alias de eventId' }
                 }
               }
             }
