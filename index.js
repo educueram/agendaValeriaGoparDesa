@@ -870,12 +870,12 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       }));
     }
     
-    // NUEVA LÓGICA: Consultar solo el día solicitado + 2 días más (total 3 días)
+    // NUEVA LÓGICA: Consultar solo el día solicitado + 1 día más (total 2 días)
     // Si la fecha solicitada es hoy o en el futuro, empezar desde ahí
     // Si es en el pasado, empezar desde hoy
     const datesToCheck = [];
-    const maxDaysToCheck = 5; // Revisar hasta 5 días para obtener 3 días válidos (excluyendo domingos)
-    const totalDaysRequired = 3; // Total: día solicitado + 2 días más
+    const maxDaysToCheck = 3; // Revisar hasta 3 días para obtener 2 días válidos (excluyendo domingos)
+    const totalDaysRequired = 2; // Total: día solicitado + 1 día más
     
     let daysAdded = 0;
     for (let i = 0; i < maxDaysToCheck && daysAdded < totalDaysRequired; i++) {
@@ -896,9 +896,9 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       daysAdded++;
     }
     
-    console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS (DÍA SOLICITADO + 2 MÁS) ===`);
+    console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS (DÍA SOLICITADO + 1 MÁS) ===`);
     console.log(`📅 Fecha inicial: ${startDate.format('YYYY-MM-DD')} (${startDate.format('dddd')})`);
-    console.log(`📅 Días a consultar: ${datesToCheck.length} (solo día solicitado + 2 días más)`);
+    console.log(`📅 Días a consultar: ${datesToCheck.length} (solo día solicitado + 1 día más)`);
     datesToCheck.forEach((day, idx) => {
       const dayMoment = moment(day.date).tz(config.timezone.default);
       console.log(`   ${idx + 1}. ${dayMoment.format('YYYY-MM-DD')} (${dayMoment.format('dddd')})`);
