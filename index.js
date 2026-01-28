@@ -1451,16 +1451,36 @@ app.post('/api/cancela-cita', async (req, res) => {
     // Obtener calendar ID
     const calendarId = findData(calendarNumber, sheetData.calendars, 0, 1);
     if (!calendarId) {
-      console.log(`❌ Calendario ${calendarNumber} no encontrado`);
-      return res.json({ respuesta: '🚫 Error: El calendario solicitado no fue encontrado.' });
+      console.log(`❌ Calendario ${calendarNumber} no encontrado. Intentando cancelar en todos los calendarios...`);
+    } else {
+      console.log(`📅 Calendar ID: ${calendarId}`);
     }
 
-    console.log(`📅 Calendar ID: ${calendarId}`);
+    const attemptedCalendarIds = new Set();
+    const tryCancelInCalendar = async (targetCalendarId) => {
+      if (!targetCalendarId || attemptedCalendarIds.has(targetCalendarId)) return null;
+      attemptedCalendarIds.add(targetCalendarId);
+      return cancelEventByReservationCodeOriginal(targetCalendarId, codigoReservaFinal);
+    };
 
-    // USAR LÓGICA ORIGINAL: Cancelar por código de evento
-    const cancelResult = await cancelEventByReservationCodeOriginal(calendarId, codigoReservaFinal);
+    // Intentar primero con el calendario solicitado (si existe)
+    let cancelResult = calendarId ? await tryCancelInCalendar(calendarId) : null;
+
+    // Si no existe el calendario o falló, intentar en todos los calendarios configurados
+    if (!cancelResult || !cancelResult.success) {
+      const calendarRows = Array.isArray(sheetData.calendars) ? sheetData.calendars.slice(1) : [];
+      for (const row of calendarRows) {
+        const candidateCalendarId = row && row[1] ? row[1].toString().trim() : '';
+        const result = await tryCancelInCalendar(candidateCalendarId);
+        if (result && result.success) {
+          cancelResult = result;
+          console.log(`✅ Cancelación encontrada en calendario alterno: ${candidateCalendarId}`);
+          break;
+        }
+      }
+    }
     
-    if (cancelResult.success) {
+    if (cancelResult && cancelResult.success) {
       // Actualizar estado en Google Sheets
       try {
         await updateClientStatus(codigoReservaFinal, 'CANCELADA');
@@ -1475,7 +1495,10 @@ app.post('/api/cancela-cita', async (req, res) => {
       
     } else {
       console.log('❌ Cancelación fallida');
-      return res.json({ respuesta: cancelResult.message });
+      const fallbackMessage = cancelResult && cancelResult.message
+        ? cancelResult.message
+        : `🤷‍♀️ No se encontró ninguna cita con el código de reserva ${codigoReservaFinal.toUpperCase()} en ningún calendario. Verifica que el código sea correcto.`;
+      return res.json({ respuesta: fallbackMessage });
     }
 
   } catch (error) {
