@@ -149,6 +149,55 @@ function formatTime(date) {
   return moment(date).tz(config.timezone.default).format('HH:mm');
 }
 
+const CIRCLED_LETTERS = [
+  'Ⓐ', 'Ⓑ', 'Ⓒ', 'Ⓓ', 'Ⓔ', 'Ⓕ', 'Ⓖ', 'Ⓗ', 'Ⓘ', 'Ⓙ', 'Ⓚ', 'Ⓛ', 'Ⓜ',
+  'Ⓝ', 'Ⓞ', 'Ⓟ', 'Ⓠ', 'Ⓡ', 'Ⓢ', 'Ⓣ', 'Ⓤ', 'Ⓥ', 'Ⓦ', 'Ⓧ', 'Ⓨ', 'Ⓩ'
+];
+
+function getCircledLetter(letter) {
+  const index = letter.charCodeAt(0) - 65;
+  return CIRCLED_LETTERS[index] || letter;
+}
+
+function formatSlotsForWhatsApp(slotEntries) {
+  const total = slotEntries.length;
+  let columns = 1;
+  if (total >= 4 && total <= 8) {
+    columns = 2;
+  } else if (total >= 9) {
+    columns = 3;
+  }
+
+  const chunkSize = Math.ceil(total / columns);
+  const columnChunks = [];
+  for (let i = 0; i < columns; i++) {
+    columnChunks.push(slotEntries.slice(i * chunkSize, (i + 1) * chunkSize));
+  }
+
+  const colWidths = columnChunks.map((col) => {
+    if (!col.length) return 0;
+    return Math.max(...col.map((entry) => entry.display.length));
+  });
+
+  const maxRows = Math.max(...columnChunks.map((col) => col.length));
+  const lines = [];
+  for (let row = 0; row < maxRows; row++) {
+    const parts = [];
+    for (let col = 0; col < columns; col++) {
+      const entry = columnChunks[col][row];
+      if (!entry) {
+        parts.push('');
+        continue;
+      }
+      const padded = col < columns - 1 ? entry.display.padEnd(colWidths[col], ' ') : entry.display;
+      parts.push(padded);
+    }
+    lines.push(parts.join('    ').trimEnd());
+  }
+
+  return lines.join('\n');
+}
+
 
 
 function formatDateToSpanishPremium(date) {
@@ -1240,7 +1289,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     daysWithSlots.sort((a, b) => a.priority - b.priority);
     
     //let responseText = `🔥 ¡${daysWithSlots.length} ${daysWithSlots.length === 1 ? 'día' : 'días'} con disponibilidad encontrada!\n\n`;
-    let responseText = '';
+    let responseText = '📅 *Estas son las fechas que tenemos disponibles:*\n\n';
     
     const totalSlotsAvailable = daysWithSlots.reduce((sum, day) => sum + day.stats.availableSlots, 0);
     const avgOccupation = Math.round(daysWithSlots.reduce((sum, day) => sum + day.stats.occupationPercentage, 0) / daysWithSlots.length);
@@ -1250,7 +1299,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     let letterIndex = 0;
     let dateMapping = {};
     
-    // Formatear mensaje con todos los días en formato compacto
+    // Formatear mensaje con todos los días en formato más visual
     for (const dayData of daysWithSlots) {
       // CORRECCIÓN: Asegurar que se use la fecha correcta con zona horaria
       const dayMoment = moment(dayData.date).tz(config.timezone.default);
@@ -1259,14 +1308,12 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       // CORRECCIÓN: Usar fecha formateada correctamente
       const correctDateStr = dayMoment.format('YYYY-MM-DD');
       
-      // Formato mejorado: Día y número del día
-      // Ejemplo: "Lunes 15" o "Martes 16"
-      const dayNumber = dayMoment.format('D');
-      const dayOfWeek = dayMoment.format('dddd');
-      
-      // Formato: "Lunes 15" (sin asteriscos para que se vea más limpio)
-      responseText += `${dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1)} ${dayNumber}\n`;
-      
+      const dayLabelRaw = dayMoment.format('dddd D [de] MMMM');
+      const dayLabel = dayLabelRaw.charAt(0).toUpperCase() + dayLabelRaw.slice(1);
+
+      responseText += '━━━━━━━━━━━━━━━━━━━━━\n\n';
+      responseText += `🗓️ *${dayLabel}*\n`;
+
       const formattedSlots = dayData.slots.map((slot) => {
         const letter = String.fromCharCode(65 + letterIndex); // A, B, C, etc.
         const time12h = formatTimeTo12Hour(slot);
@@ -1278,11 +1325,12 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
         };
         
         letterIndex++;
-        // Formato: "A 12:00" o "B 1:00 PM"
-        return `${letter} ${time12h}`;
-      }).join('\n');
-      
-      responseText += formattedSlots + '\n\n';
+        return {
+          display: `${getCircledLetter(letter)} ${time12h}`
+        };
+      });
+
+      responseText += `${formatSlotsForWhatsApp(formattedSlots)}\n\n`;
     }
     
     const hasEarlierDay = daysWithSlots.some(day => day.label === 'anterior');
@@ -1303,7 +1351,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     }
       */
     
-    responseText += `\n💡 Escribe la letra del horario que prefieras (A, B, C...) ✈️`;
+    responseText += `💡 Escribe la letra del horario que prefieras`;
     
     return res.json(createJsonResponse({ 
       respuesta: responseText,
