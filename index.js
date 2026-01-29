@@ -352,10 +352,10 @@ async function checkDayAvailability(dayMoment, calendarNumber, serviceNumber, sh
     // CORRECCIÓN: Horario según el día de la semana
     let correctedHours;
     if (isSaturday) {
-      // SÁBADO: Horario especial 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
+      // SÁBADO: Horario especial fijo 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
       correctedHours = {
-        start: Math.max(workingHours.start, config.workingHours.saturday.startHour || 10),
-        end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 14), // 2 PM (14:00)
+        start: config.workingHours.saturday.startHour || 10,
+        end: config.workingHours.saturday.endHour || 14, // 2 PM (14:00)
         dayName: workingHours.dayName,
         hasLunch: false, // Sábados no tienen horario de comida
         lunchStart: null,
@@ -673,8 +673,8 @@ function generateHourlySlots(dateMoment, workingHours) {
     console.log(`⏰ Hora actual: ${now.format('HH:mm')}, mínimo booking: ${minimumBookingTime.format('HH:mm')}`);
   }
   
-  // Generar todos los slots posibles de hora en hora
-  for (let hour = workingHours.start; hour < workingHours.end; hour++) {
+  // Generar todos los slots posibles de hora en hora (incluye última cita)
+  for (let hour = workingHours.start; hour <= workingHours.end; hour++) {
     console.log(`\n🔍 === EVALUANDO SLOT ${hour}:00 ===`);
     
     // 1. Verificar si es horario de comida
@@ -700,7 +700,7 @@ function generateHourlySlots(dateMoment, workingHours) {
   }
   
   console.log(`\n📊 === RESUMEN SLOTS ===`);
-  console.log(`Total slots evaluados: ${workingHours.end - workingHours.start}`);
+  console.log(`Total slots evaluados: ${workingHours.end - workingHours.start + 1}`);
   console.log(`Slots válidos generados: ${availableSlots.length}`);
   console.log(`Slots: [${availableSlots.join(', ')}]`);
   
@@ -938,10 +938,10 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
           // CORRECCIÓN: Horario según el día de la semana
           let correctedHours;
           if (isSaturday) {
-            // SÁBADO: Horario especial 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
+            // SÁBADO: Horario especial fijo 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
             correctedHours = {
-              start: Math.max(workingHours.start, config.workingHours.saturday.startHour || 10),
-              end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 14), // 2 PM (14:00)
+              start: config.workingHours.saturday.startHour || 10,
+              end: config.workingHours.saturday.endHour || 14, // 2 PM (14:00)
               dayName: workingHours.dayName
             };
             console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
@@ -1101,10 +1101,10 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       
       let correctedHours;
       if (isSaturdayForHours) {
-        // SÁBADO: Horario especial 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
+        // SÁBADO: Horario especial fijo 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
         correctedHours = {
-          start: Math.max(workingHours.start, config.workingHours.saturday.startHour || 10),
-          end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 14), // 2 PM (14:00)
+          start: config.workingHours.saturday.startHour || 10,
+          end: config.workingHours.saturday.endHour || 14, // 2 PM (14:00)
           dayName: workingHours.dayName
         };
         console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);

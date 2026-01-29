@@ -8,10 +8,10 @@ const crypto = require('crypto');
  * Migrado desde Google Apps Script
  */
 
-/**
- * Encontrar slots disponibles en un calendario
- * Horario: 10 AM a 6 PM, excluyendo horario de comida (2 PM a 3 PM)
- */
+  /**
+   * Encontrar slots disponibles en un calendario
+   * Horario: 10 AM a 6 PM, excluyendo horario de comida (2 PM a 3 PM)
+   */
 async function findAvailableSlots(calendarId, date, durationMinutes, hours) {
   try {
     console.log(`📅 Buscando slots para ${calendarId} el ${date.toISOString().split('T')[0]}`);
@@ -25,15 +25,34 @@ async function findAvailableSlots(calendarId, date, durationMinutes, hours) {
       return [];
     }
     
-    // Definir horario según día
+    // Definir horario según día (usar "hours" si viene del caller)
     let workingHours;
-    if (dayOfWeek === 6) { // Sábado
-      workingHours = { start: 10, end: 14 }; // 10 AM - 2 PM
+    if (hours && typeof hours === 'object') {
+      const isSaturday = dayOfWeek === 6;
+      const defaultStart = isSaturday ? 10 : 10;
+      const defaultEnd = isSaturday ? 14 : 18;
+      const start = Number.isFinite(hours.start) ? hours.start : defaultStart;
+      const end = Number.isFinite(hours.end) ? hours.end : defaultEnd;
+      const hasLunch = typeof hours.hasLunch === 'boolean'
+        ? hours.hasLunch
+        : (hours.lunchStart !== undefined && hours.lunchEnd !== undefined);
+      workingHours = {
+        start,
+        end,
+        hasLunch,
+        lunchStart: hours.lunchStart,
+        lunchEnd: hours.lunchEnd
+      };
+    } else if (dayOfWeek === 6) { // Sábado
+      workingHours = { start: 10, end: 14, hasLunch: false }; // 10 AM - 2 PM
     } else { // Lunes a viernes
-      workingHours = { start: 10, end: 18 }; // 10 AM - 6 PM
+      workingHours = { start: 10, end: 18, hasLunch: true, lunchStart: 14, lunchEnd: 15 }; // 10 AM - 6 PM
     }
     
     console.log(`📅 Horario: ${workingHours.start}:00 - ${workingHours.end}:00`);
+    if (workingHours.hasLunch) {
+      console.log(`🍽️ Horario comida: ${workingHours.lunchStart}:00 - ${workingHours.lunchEnd}:00`);
+    }
     
     // Obtener eventos del calendario
     const startOfDay = dateMoment.clone().hour(workingHours.start).minute(0).second(0);
@@ -85,6 +104,11 @@ async function findAvailableSlots(calendarId, date, durationMinutes, hours) {
     const isToday = dateMoment.isSame(now, 'day');
     
     for (let hour = workingHours.start; hour <= workingHours.end; hour++) {
+      // Excluir horario de comida
+      if (workingHours.hasLunch && hour >= workingHours.lunchStart && hour < workingHours.lunchEnd) {
+        console.log(`❌ Slot ${hour}:00 en horario de comida`);
+        continue;
+      }
       // Verificar si está ocupado
       if (occupiedHours.has(hour)) {
         console.log(`❌ Slot ${hour}:00 ocupado`);
