@@ -2303,50 +2303,23 @@ app.post('/api/verificar-cliente-seleccion-hora', async (req, res) => {
     console.log(`✅ Resultados encontrados: ${pacientesEncontrados.length}`);
 
     if (pacientesEncontrados && pacientesEncontrados.length > 0) {
-      const pacienteMasReciente = pacientesEncontrados[0];
-      
-      console.log('✅ Cliente recurrente detectado');
-      console.log(`   - Nombre: ${pacienteMasReciente.nombreCompleto}`);
-      console.log(`   - Email: ${pacienteMasReciente.correoElectronico}`);
-      
-      // Mensaje para cliente recurrente - más directo y claro
-      const mensajeRecurrente = `¡Perfecto! Elegiste las ${horaSeleccionada} del ${fechaSeleccionada} 👍
-
-Encontramos tus datos en nuestro sistema:
-• Nombre: ${pacienteMasReciente.nombreCompleto}
-• Correo: ${pacienteMasReciente.correoElectronico || 'No registrado'}
-
-¿Usamos estos mismos datos para agendar tu cita? Responde 'sí' para confirmar 😊`;
-
-      return res.json({
-        success: true,
-        tipoCliente: 'recurrente',
-        datosCliente: {
-          nombreCompleto: pacienteMasReciente.nombreCompleto,
-          correoElectronico: pacienteMasReciente.correoElectronico,
-          telefono: pacienteMasReciente.telefono || telefono
-        },
-        mensaje: mensajeRecurrente,
-        requiereDatosAdicionales: false,
-        puedeAgendarDirectamente: true
-      });
-      
+      console.log('✅ Cliente recurrente detectado (flujo tradicional activado)');
     } else {
       console.log('⚠️ Cliente nuevo detectado');
-      
-      // Mensaje para cliente nuevo
-      const mensajeNuevo = `¡Perfecto! Elegiste las ${horaSeleccionada} del ${fechaSeleccionada} 👍
+    }
+    
+    // Flujo tradicional: siempre pedir nombre, sin sugerir datos guardados
+    const mensajeNuevo = `¡Perfecto! Elegiste las ${horaSeleccionada} del ${fechaSeleccionada} 👍
 
 ¿Me puedes decir tu nombre para la reserva? 😊`;
 
-      return res.json({
-        success: true,
-        tipoCliente: 'nuevo',
-        datosCliente: null,
-        mensaje: mensajeNuevo,
-        requiereDatosAdicionales: true
-      });
-    }
+    return res.json({
+      success: true,
+      tipoCliente: 'nuevo',
+      datosCliente: null,
+      mensaje: mensajeNuevo,
+      requiereDatosAdicionales: true
+    });
 
   } catch (error) {
     console.error('❌ Error en verificación de cliente:', error.message);
