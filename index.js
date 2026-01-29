@@ -352,10 +352,10 @@ async function checkDayAvailability(dayMoment, calendarNumber, serviceNumber, sh
     // CORRECCIÓN: Horario según el día de la semana
     let correctedHours;
     if (isSaturday) {
-      // SÁBADO: Horario especial 10 AM - 1 PM (última sesión: 1 PM - 2 PM)
+      // SÁBADO: Horario especial 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
       correctedHours = {
         start: Math.max(workingHours.start, config.workingHours.saturday.startHour || 10),
-        end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 13), // 1 PM (13:00)
+        end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 14), // 2 PM (14:00)
         dayName: workingHours.dayName,
         hasLunch: false, // Sábados no tienen horario de comida
         lunchStart: null,
@@ -363,10 +363,10 @@ async function checkDayAvailability(dayMoment, calendarNumber, serviceNumber, sh
       };
       console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
     } else {
-      // DÍAS NORMALES: Horario de 10 AM a 7 PM
+      // DÍAS NORMALES: Horario de 10 AM a 6 PM
       correctedHours = {
         start: Math.max(workingHours.start, 10), // Mínimo 10 AM
-        end: Math.min(workingHours.end, 19), // Máximo 7 PM (19:00)
+        end: Math.min(workingHours.end, 18), // Máximo 6 PM (18:00)
         dayName: workingHours.dayName,
         hasLunch: true,
         lunchStart: config.workingHours.lunchStartHour || 14, // 2 PM
@@ -575,12 +575,12 @@ const developmentMockData = {
   ],
   hours: [
     ['Calendar', 'Día', 'Hora Inicio', 'Hora Fin'],
-    ['1', '1', '10', '19'],
-    ['1', '2', '10', '19'],
-    ['1', '3', '10', '19'],
-    ['1', '4', '10', '19'],
-    ['1', '5', '10', '19'],
-    ['1', '6', '10', '12'],
+    ['1', '1', '10', '18'],
+    ['1', '2', '10', '18'],
+    ['1', '3', '10', '18'],
+    ['1', '4', '10', '18'],
+    ['1', '5', '10', '18'],
+    ['1', '6', '10', '14'],
     ['2', '1', '10', '18']
   ]
 };
@@ -608,9 +608,9 @@ function mockFindAvailableSlots(calendarId, date, durationMinutes, hours) {
     };
   }
   
-  // VALIDACIÓN: SÁBADO - Horario especial (10 AM - 12 PM)
+  // VALIDACIÓN: SÁBADO - Horario especial (10 AM - 2 PM)
   if (dayOfWeek === 6) { // Sábado
-    console.log(`📅 Mock - SÁBADO - Horario especial: 10:00 AM - 12:00 PM`);
+    console.log(`📅 Mock - SÁBADO - Horario especial: 10:00 AM - 2:00 PM`);
     const saturdaySlots = generateHourlySlots(dateMoment, {
       start: config.workingHours.saturday.startHour,
       end: config.workingHours.saturday.endHour,
@@ -622,7 +622,7 @@ function mockFindAvailableSlots(calendarId, date, durationMinutes, hours) {
     if (saturdaySlots.length === 0) {
       return {
         slots: [],
-        message: '📅 Sábados trabajamos de 10:00 AM a 12:00 PM, pero no hay espacios disponibles.',
+        message: '📅 Sábados trabajamos de 10:00 AM a 2:00 PM, pero no hay espacios disponibles.',
         dayType: 'saturday-full'
       };
     }
@@ -634,10 +634,10 @@ function mockFindAvailableSlots(calendarId, date, durationMinutes, hours) {
     };
   }
   
-  // HORARIOS NORMALES (Lunes a Viernes): SI O SI 10 AM a 7 PM
+  // HORARIOS NORMALES (Lunes a Viernes): SI O SI 10 AM a 6 PM
   const workingHours = {
     start: 10,  // FORZADO: Siempre 10 AM
-    end: 19,    // FORZADO: Siempre 7 PM (19:00)
+    end: 18,    // FORZADO: Siempre 6 PM (18:00)
     lunchStart: config.workingHours.lunchStartHour || 14,  // 2 PM
     lunchEnd: config.workingHours.lunchEndHour || 15,      // 3 PM
     hasLunch: true
@@ -938,18 +938,18 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
           // CORRECCIÓN: Horario según el día de la semana
           let correctedHours;
           if (isSaturday) {
-            // SÁBADO: Horario especial 10 AM - 1 PM (última sesión: 1 PM - 2 PM)
+            // SÁBADO: Horario especial 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
             correctedHours = {
               start: Math.max(workingHours.start, config.workingHours.saturday.startHour || 10),
-              end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 13), // 1 PM (13:00)
+              end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 14), // 2 PM (14:00)
               dayName: workingHours.dayName
             };
             console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
           } else {
-            // DÍAS NORMALES: SI O SI 10 AM a 7 PM
+            // DÍAS NORMALES: SI O SI 10 AM a 6 PM
             correctedHours = {
               start: 10, // FORZADO: Siempre 10 AM
-              end: 19,   // FORZADO: Siempre 7 PM (19:00)
+              end: 18,   // FORZADO: Siempre 6 PM (18:00)
               dayName: workingHours.dayName
             };
           }
@@ -960,7 +960,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
           console.log(`   - Horario comida: Flexible según eventos del calendario`);
           
           // CORRECCIÓN: Calcular total slots posibles (horario laboral completo)
-          // Incluir el slot de la última hora (7 PM) como última sesión
+          // Incluir el slot de la última hora (6 PM) como última sesión
           const totalPossibleSlots = correctedHours.end - correctedHours.start + 1;
           
           console.log(`   📊 Total slots posibles: ${totalPossibleSlots} (de ${correctedHours.start}:00 a ${correctedHours.end}:00)`);
@@ -1101,18 +1101,18 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       
       let correctedHours;
       if (isSaturdayForHours) {
-        // SÁBADO: Horario especial 10 AM - 1 PM (última sesión: 1 PM - 2 PM)
+        // SÁBADO: Horario especial 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
         correctedHours = {
           start: Math.max(workingHours.start, config.workingHours.saturday.startHour || 10),
-          end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 13), // 1 PM (13:00)
+          end: Math.min(workingHours.end, config.workingHours.saturday.endHour || 14), // 2 PM (14:00)
           dayName: workingHours.dayName
         };
         console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
       } else {
-        // DÍAS NORMALES: SI O SI 10 AM a 7 PM
+        // DÍAS NORMALES: SI O SI 10 AM a 6 PM
         correctedHours = {
           start: 10, // FORZADO: Siempre 10 AM
-          end: 19,   // FORZADO: Siempre 7 PM (19:00)
+          end: 18,   // FORZADO: Siempre 6 PM (18:00)
           dayName: workingHours.dayName
         };
       }
@@ -1623,7 +1623,7 @@ app.post('/api/reagenda-cita', async (req, res) => {
       });
     }
 
-    // VALIDACIÓN 3: Horario especial de Sábado (10:00 AM - 1:00 PM)
+    // VALIDACIÓN 3: Horario especial de Sábado (10:00 AM - 2:00 PM)
     if (dayOfWeek === 6) { // Sábado
       const hour = startTimeMoment.hour();
       console.log(`📅 SÁBADO - Verificando horario especial (hora: ${hour})`);
@@ -1631,9 +1631,11 @@ app.post('/api/reagenda-cita', async (req, res) => {
       if (hour < config.workingHours.saturday.startHour || hour >= config.workingHours.saturday.endHour) {
         const saturdayStart = config.workingHours.saturday.startHour;
         const saturdayEnd = config.workingHours.saturday.endHour;
+        const saturdayStartLabel = formatTimeTo12Hour(`${saturdayStart.toString().padStart(2, '0')}:00`);
+        const saturdayEndLabel = formatTimeTo12Hour(`${saturdayEnd.toString().padStart(2, '0')}:00`);
         
         return res.json({ 
-          respuesta: `⚠️ Los sábados solo se atiende de ${saturdayStart}:00 AM a ${saturdayEnd}:00 PM.\n\n🔍 Por favor, selecciona un horario dentro de este rango o elige otro día.` 
+          respuesta: `⚠️ Los sábados solo se atiende de ${saturdayStartLabel} a ${saturdayEndLabel}.\n\n🔍 Por favor, selecciona un horario dentro de este rango o elige otro día.` 
         });
       }
       console.log('✅ Horario válido para sábado');
@@ -1658,14 +1660,18 @@ app.post('/api/reagenda-cita', async (req, res) => {
       });
     }
 
-    // VALIDACIÓN 5: Horario laboral normal (Lunes a Viernes: 10 AM - 7 PM)
+    // VALIDACIÓN 5: Horario laboral normal (Lunes a Viernes: 10 AM - 6 PM)
     if (dayOfWeek >= 1 && dayOfWeek <= 5) { // Lunes a Viernes
       const hour = startTimeMoment.hour();
       console.log(`📅 DÍA LABORAL - Verificando horario (hora: ${hour})`);
       
       if (hour < config.workingHours.startHour || hour >= config.workingHours.endHour) {
+        const startHour = config.workingHours.startHour;
+        const endHour = config.workingHours.endHour;
+        const startLabel = formatTimeTo12Hour(`${startHour.toString().padStart(2, '0')}:00`);
+        const endLabel = formatTimeTo12Hour(`${endHour.toString().padStart(2, '0')}:00`);
         return res.json({ 
-          respuesta: `⚠️ El horario de atención es de ${config.workingHours.startHour}:00 AM a ${config.workingHours.endHour}:00 PM.\n\n🔍 Por favor, selecciona un horario dentro de este rango.` 
+          respuesta: `⚠️ El horario de atención es de ${startLabel} a ${endLabel}.\n\n🔍 Por favor, selecciona un horario dentro de este rango.` 
         });
       }
       console.log('✅ Horario válido para día laboral');
