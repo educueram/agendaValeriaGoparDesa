@@ -186,6 +186,9 @@ Te recordamos que tienes una cita programada para *mañana*:
 Responde con:
 • 1️⃣ *CONFIRMAR* - Para confirmar tu asistencia
 • 2️⃣ *REAGENDAR* - Si necesitas cambiar la fecha/hora
+• 3️⃣ *CANCELAR* - Si deseas cancelar tu cita
+
+👉 También puedes escribir: *CONFIRMAR ${appointment.codigoReserva}*, *REAGENDAR ${appointment.codigoReserva}* o *CANCELAR ${appointment.codigoReserva}*
 
 📍 ${config.business.address}
 

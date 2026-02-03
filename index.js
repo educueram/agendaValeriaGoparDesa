@@ -13,7 +13,7 @@ const { initializeAuth, getCalendarInstance } = require('./services/googleAuth')
 const { getSheetData, findData, findWorkingHours, updateClientStatus, updateClientAppointmentDateTime, getClientDataByReservationCode, saveClientDataOriginal, ensureClientsSheet, consultaDatosPacientePorTelefono } = require('./services/googleSheets');
 const { findAvailableSlots, cancelEventByReservationCodeOriginal, createEventOriginal, createEventWithCustomId, generateUniqueReservationCode, formatTimeTo12Hour } = require('./services/googleCalendar');
 const { sendAppointmentConfirmation, sendNewAppointmentNotification, sendRescheduledAppointmentConfirmation, emailServiceReady } = require('./services/emailService');
-const { getUpcomingAppointments24h, sendEmailReminder24h } = require('./services/reminderService');
+const { getUpcomingAppointments24h } = require('./services/reminderService');
 const { sendWhatsAppReminder24h } = require('./services/whatsappService');
 
 const app = express();
@@ -105,6 +105,46 @@ function normalizePhone(phone) {
   }
   
   return cleaned;
+}
+
+/**
+ * Encontrar la próxima cita futura por teléfono
+ */
+async function findUpcomingAppointmentByPhone(phone) {
+  if (!phone) return null;
+  
+  const records = await consultaDatosPacientePorTelefono(phone.toString().trim());
+  if (!records || records.length === 0) return null;
+  
+  const now = moment().tz(config.timezone.default);
+  const candidates = records
+    .map(record => {
+      const fecha = record.fechaCita || '';
+      const hora = record.horaCita || '';
+      const estado = (record.estado || '').toString().toUpperCase();
+      
+      if (!fecha || !hora || estado === 'CANCELADA') return null;
+      
+      const appointmentTime = moment.tz(`${fecha} ${hora}`, 'YYYY-MM-DD HH:mm', config.timezone.default);
+      if (!appointmentTime.isValid() || appointmentTime.isBefore(now)) return null;
+      
+      return {
+        codigoReserva: record.codigoReserva || '',
+        clientName: record.nombreCompleto || '',
+        clientPhone: record.telefono || '',
+        clientEmail: record.correoElectronico || '',
+        profesionalName: record.profesionalName || '',
+        fechaCita: fecha,
+        horaCita: hora,
+        serviceName: record.servicio || '',
+        estado,
+        appointmentTime
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.appointmentTime.valueOf() - b.appointmentTime.valueOf());
+  
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
 /**
@@ -1470,18 +1510,27 @@ app.post('/api/cancela-cita', async (req, res) => {
       calendar: calendarNumberRaw,
       eventId,
       codigo_reserva,
-      codigoReserva
+      codigoReserva,
+      telefono
     } = req.body;
-    const codigoReservaFinal = (eventId || codigo_reserva || codigoReserva || '').toString().trim();
+    let codigoReservaFinal = (eventId || codigo_reserva || codigoReserva || '').toString().trim();
     const calendarNumber = (calendarNumberRaw || '1').toString().trim();
 
     // Validar parámetros
-    if (!action || action !== 'cancel') {
+    if (action && action !== 'cancel') {
       return res.json({ respuesta: '⚠️ Error: Se requiere action: "cancel"' });
     }
 
+    if (!codigoReservaFinal && telefono) {
+      const upcomingAppointment = await findUpcomingAppointmentByPhone(telefono);
+      if (upcomingAppointment) {
+        codigoReservaFinal = upcomingAppointment.codigoReserva;
+        console.log(`📞 Código inferido por teléfono (${telefono}): ${codigoReservaFinal}`);
+      }
+    }
+
     if (!codigoReservaFinal) {
-      return res.json({ respuesta: '⚠️ Error de cancelación: Falta el código de reserva (eventId/codigo_reserva).' });
+      return res.json({ respuesta: '⚠️ Error de cancelación: Falta el código de reserva o teléfono del cliente.' });
     }
 
     console.log(`📊 Parámetros: calendar=${calendarNumber}, código=${codigoReservaFinal}`);
@@ -1563,20 +1612,29 @@ app.post('/api/reagenda-cita', async (req, res) => {
     console.log('🔄 === INICIO REAGENDAMIENTO ===');
     console.log('Body recibido:', JSON.stringify(req.body, null, 2));
     
-    const { codigo_reserva, fecha_reagendada, hora_reagendada } = req.body;
+    const { codigo_reserva, fecha_reagendada, hora_reagendada, telefono } = req.body;
+    let codigoReservaFinal = (codigo_reserva || '').toString().trim();
+
+    if (!codigoReservaFinal && telefono) {
+      const upcomingAppointment = await findUpcomingAppointmentByPhone(telefono);
+      if (upcomingAppointment) {
+        codigoReservaFinal = upcomingAppointment.codigoReserva;
+        console.log(`📞 Código inferido por teléfono (${telefono}): ${codigoReservaFinal}`);
+      }
+    }
 
     // PASO 1: Validar parámetros
-    if (!codigo_reserva || !fecha_reagendada || !hora_reagendada) {
+    if (!codigoReservaFinal || !fecha_reagendada || !hora_reagendada) {
       return res.json({ 
-        respuesta: '⚠️ Error: Faltan datos. Se requiere codigo_reserva, fecha_reagendada y hora_reagendada.' 
+        respuesta: '⚠️ Error: Faltan datos. Se requiere codigo_reserva o telefono, fecha_reagendada y hora_reagendada.' 
       });
     }
 
-    console.log(`📊 Parámetros: código=${codigo_reserva}, fecha=${fecha_reagendada}, hora=${hora_reagendada}`);
+    console.log(`📊 Parámetros: código=${codigoReservaFinal}, fecha=${fecha_reagendada}, hora=${hora_reagendada}`);
 
     // PASO 2: Obtener información de la cita desde Google Sheets
     console.log('📋 Obteniendo información de la cita...');
-    const clientData = await getClientDataByReservationCode(codigo_reserva);
+    const clientData = await getClientDataByReservationCode(codigoReservaFinal);
     
     if (!clientData) {
       console.log(`❌ No se encontró cita con código: ${codigo_reserva}`);
@@ -1611,7 +1669,7 @@ app.post('/api/reagenda-cita', async (req, res) => {
 
     // PASO 4: Eliminar evento antiguo del calendario
     console.log('🗑️ Eliminando evento antiguo del calendario...');
-    const cancelResult = await cancelEventByReservationCodeOriginal(calendarId, codigo_reserva);
+    const cancelResult = await cancelEventByReservationCodeOriginal(calendarId, codigoReservaFinal);
     
     if (cancelResult.success) {
       console.log('✅ Evento antiguo eliminado exitosamente');
@@ -1731,7 +1789,7 @@ app.post('/api/reagenda-cita', async (req, res) => {
     // PASO 6: Crear evento con ID personalizado en Google Calendar
     console.log('📝 Creando evento en el calendario con ID personalizado...');
     
-    const eventTitle = `Cita: ${clientData.clientName} (${codigo_reserva})`;
+    const eventTitle = `Cita: ${clientData.clientName} (${codigoReservaFinal})`;
     const eventDescription = `
 Cliente: ${clientData.clientName}
 Teléfono: ${clientData.clientPhone}
@@ -1750,7 +1808,7 @@ Agendado por: Agente de WhatsApp`;
     };
 
     // Usar createEventWithCustomId para crear el nuevo evento con el código como ID
-    const createResult = await createEventWithCustomId(calendarId, eventData, codigo_reserva);
+    const createResult = await createEventWithCustomId(calendarId, eventData, codigoReservaFinal);
 
     if (!createResult.success) {
       console.log('❌ Error creando evento');
@@ -1798,7 +1856,7 @@ Agendado por: Agente de WhatsApp`;
           newTime: hora_reagendada,
           serviceName: clientData.serviceName,
           profesionalName: clientData.profesionalName,
-          codigoReserva: codigo_reserva.toUpperCase()
+        codigoReserva: codigoReservaFinal.toUpperCase()
         };
         
         console.log('📧 Enviando confirmación de reagendamiento al cliente...');
@@ -1830,7 +1888,7 @@ Agendado por: Agente de WhatsApp`;
 • Servicio: ${clientData.serviceName}
 • Especialista: ${clientData.profesionalName}
 
-🎟️ TU CÓDIGO DE RESERVA: ${codigo_reserva.toUpperCase()}
+    🎟️ TU CÓDIGO DE RESERVA: ${codigoReservaFinal.toUpperCase()}
 
 ✅ Tu cita ha sido reagendada correctamente.
 📧 Recibirás un correo de confirmación.
@@ -1856,25 +1914,34 @@ app.post('/api/confirma-cita', async (req, res) => {
     console.log('✅ === CONFIRMACIÓN DE CITA ===');
     console.log('Body recibido:', JSON.stringify(req.body, null, 2));
     
-    const { codigo_reserva } = req.body;
+    const { codigo_reserva, telefono } = req.body;
+    let codigoReservaFinal = (codigo_reserva || '').toString().trim();
+
+    if (!codigoReservaFinal && telefono) {
+      const upcomingAppointment = await findUpcomingAppointmentByPhone(telefono);
+      if (upcomingAppointment) {
+        codigoReservaFinal = upcomingAppointment.codigoReserva;
+        console.log(`📞 Código inferido por teléfono (${telefono}): ${codigoReservaFinal}`);
+      }
+    }
 
     // PASO 1: Validar parámetros
-    if (!codigo_reserva) {
+    if (!codigoReservaFinal) {
       return res.json({ 
-        respuesta: '⚠️ Error: Se requiere el codigo_reserva.' 
+        respuesta: '⚠️ Error: Se requiere el codigo_reserva o telefono.' 
       });
     }
 
-    console.log(`📊 Código de reserva: ${codigo_reserva}`);
+    console.log(`📊 Código de reserva: ${codigoReservaFinal}`);
 
     // PASO 2: Obtener información de la cita desde Google Sheets
     console.log('📋 Obteniendo información de la cita...');
-    const clientData = await getClientDataByReservationCode(codigo_reserva);
+    const clientData = await getClientDataByReservationCode(codigoReservaFinal);
     
     if (!clientData) {
       console.log(`❌ No se encontró cita con código: ${codigo_reserva}`);
       return res.json({ 
-        respuesta: `❌ No se encontró ninguna cita con el código de reserva ${codigo_reserva.toUpperCase()}. Verifica que el código sea correcto.` 
+        respuesta: `❌ No se encontró ninguna cita con el código de reserva ${codigoReservaFinal.toUpperCase()}. Verifica que el código sea correcto.` 
       });
     }
 
@@ -1896,7 +1963,7 @@ app.post('/api/confirma-cita', async (req, res) => {
     // PASO 4: Actualizar estado a CONFIRMADA
     console.log('📝 Actualizando estado a CONFIRMADA...');
     try {
-      await updateClientStatus(codigo_reserva, 'CONFIRMADA');
+      await updateClientStatus(codigoReservaFinal, 'CONFIRMADA');
       console.log('✅ Estado actualizado a CONFIRMADA');
     } catch (updateError) {
       console.error('⚠️ Error actualizando estado:', updateError.message);
@@ -4404,13 +4471,13 @@ const swaggerDocument = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['action', 'eventId'],
                 properties: {
-                  action: { type: 'string', example: 'cancel' },
+                  action: { type: 'string', example: 'cancel', description: 'Opcional. Si no se envía, se asume cancelación.' },
                   calendar: { type: 'string', example: '1', description: 'Opcional. Por defecto: 1' },
                   eventId: { type: 'string', example: 'ABC123' },
                   codigo_reserva: { type: 'string', example: 'ABC123', description: 'Alias de eventId' },
-                  codigoReserva: { type: 'string', example: 'ABC123', description: 'Alias de eventId' }
+                  codigoReserva: { type: 'string', example: 'ABC123', description: 'Alias de eventId' },
+                  telefono: { type: 'string', example: '+52 4495847679', description: 'Opcional. Si no se envía código, se busca la próxima cita por teléfono.' }
                 }
               }
             }
@@ -4443,12 +4510,17 @@ const swaggerDocument = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['codigo_reserva', 'fecha_reagendada', 'hora_reagendada'],
+                required: ['fecha_reagendada', 'hora_reagendada'],
                 properties: {
                   codigo_reserva: { 
                     type: 'string', 
                     example: 'ABC123',
                     description: 'Código de reserva de la cita a reagendar'
+                  },
+                  telefono: {
+                    type: 'string',
+                    example: '+52 4495847679',
+                    description: 'Opcional. Si no se envía código, se busca la próxima cita por teléfono.'
                   },
                   fecha_reagendada: { 
                     type: 'string', 
@@ -4495,12 +4567,16 @@ const swaggerDocument = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['codigo_reserva'],
                 properties: {
                   codigo_reserva: { 
                     type: 'string', 
                     example: 'ABC123',
                     description: 'Código de reserva de la cita a confirmar'
+                  },
+                  telefono: {
+                    type: 'string',
+                    example: '+52 4495847679',
+                    description: 'Opcional. Si no se envía código, se busca la próxima cita por teléfono.'
                   }
                 }
               }
@@ -4891,10 +4967,10 @@ const getServerUrl = () => {
 
 /**
  * Cron Job: Verificar citas próximas en 24 horas
- * Se ejecuta una vez al día a las 9 AM
+ * Se ejecuta cada hora para cubrir todas las citas del día siguiente
  * Envía notificación 24h antes y permite confirmación
  */
-cron.schedule('0 9 * * *', async () => {
+cron.schedule('0 * * * *', async () => {
   try {
     console.log('⏰ === CRON: VERIFICANDO CITAS PRÓXIMAS (24H) ===');
     console.log(`🕒 Ejecutado a las: ${moment().tz(config.timezone.default).format('YYYY-MM-DD HH:mm:ss')}`);
@@ -4913,18 +4989,27 @@ cron.schedule('0 9 * * *', async () => {
       console.log(`\n📤 Enviando recordatorio 24h a: ${appointment.clientName}`);
       console.log(`🎟️ Código de reserva: ${appointment.codigoReserva}`);
 
+      let whatsappSuccess = false;
+
       // Enviar WhatsApp
       if (appointment.clientPhone) {
         const whatsappResult = await sendWhatsAppReminder24h(appointment);
         
-        // Si WhatsApp se envió exitosamente, actualizar estado a NOTIFICADA
         if (whatsappResult.success) {
-          console.log(`✅ WhatsApp enviado exitosamente. Actualizando estado a NOTIFICADA...`);
-          await updateClientStatus(appointment.codigoReserva, 'NOTIFICADA');
-          console.log(`✅ Estado actualizado: ${appointment.codigoReserva} -> NOTIFICADA`);
+          whatsappSuccess = true;
+          console.log(`✅ WhatsApp enviado exitosamente.`);
         } else {
           console.log(`⚠️ Error enviando WhatsApp: ${whatsappResult.error}`);
         }
+      } else {
+        console.log('⚠️ Cliente sin teléfono, no se pudo enviar WhatsApp');
+      }
+
+      // Actualizar estado si al menos un canal fue exitoso
+      if (whatsappSuccess) {
+        console.log(`✅ Actualizando estado a NOTIFICADA...`);
+        await updateClientStatus(appointment.codigoReserva, 'NOTIFICADA');
+        console.log(`✅ Estado actualizado: ${appointment.codigoReserva} -> NOTIFICADA`);
       }
     }
     
@@ -4933,12 +5018,14 @@ cron.schedule('0 9 * * *', async () => {
   } catch (error) {
     console.error('❌ Error en cron de 24h:', error.message);
   }
+}, {
+  timezone: config.timezone.default
 });
 
 
 
 console.log('✅ Cron job de recordatorios ACTIVADO');
-console.log('   - Recordatorio 24h: ACTIVADO (una vez al día a las 9 AM)');
+console.log('   - Recordatorio 24h: ACTIVADO (cada hora)');
 console.log('   - Recordatorios 12h y 15min: DESACTIVADOS');
 
 app.listen(PORT, () => {

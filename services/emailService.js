@@ -506,8 +506,13 @@ async function sendReminder24h(appointmentData) {
         </div>
 
         <div style="background-color: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #4caf50;">
-          <h3 style="color: #2e7d32; margin-top: 0;">✅ Confirma tu asistencia</h3>
-          <p style="margin: 0;">Por favor, confirma tu asistencia respondiendo a este correo o contactándonos por WhatsApp usando tu código de reserva: <strong>${codigoReserva}</strong></p>
+          <h3 style="color: #2e7d32; margin-top: 0;">✅ Confirma, reagenda o cancela</h3>
+          <p style="margin: 0 0 10px 0;">Responde con una de estas opciones (puedes escribir el número o la palabra) usando tu código de reserva: <strong>${codigoReserva}</strong></p>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li><strong>1</strong> - Confirmar asistencia</li>
+            <li><strong>2</strong> - Reagendar la cita</li>
+            <li><strong>3</strong> - Cancelar la cita</li>
+          </ul>
         </div>
 
         <div style="background-color: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
