@@ -946,43 +946,13 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     // Ajustar fecha de inicio: usar hoy si la fecha solicitada es en el pasado relativo
     const startDate = targetMoment.isBefore(today, 'day') ? today : targetMoment;
     
-    // CORRECCIÓN: Si es domingo, buscar próxima fecha disponible y mostrar mensaje
     const jsDay = targetDate.getDay();
     const sheetDayNumber = (jsDay === 0) ? 7 : jsDay;
-    
-    if (jsDay === 0) {
-      console.log(`🚫 DOMINGO detectado - Buscando próxima fecha disponible`);
-      console.log(`🔍 Buscando próxima fecha disponible con slots...`);
-      
-      // Buscar la próxima fecha disponible con slots
-      const nextAvailable = await findNextAvailableDateWithSlots(
-        targetMoment,
-        calendarNumber,
-        serviceNumber,
-        sheetData,
-        calendarId,
-        serviceDuration
-      );
-      
-      if (nextAvailable) {
-        const dayNameFormatted = formatDateToSpanishPremium(nextAvailable.date);
-        const time12h = formatTimeTo12Hour(nextAvailable.firstSlot);
-        return res.json(createJsonResponse({ 
-          respuesta: `😔 Los días domingos no contamos con servicio, puedes consultar el día **${dayNameFormatted}** (${nextAvailable.dateStr}) a las **${time12h}**.\n\n🔍 Esta es la próxima fecha y hora más cercana disponible en el calendario.` 
-        }));
-      } else {
-        return res.json(createJsonResponse({ 
-          respuesta: `😔 Los días domingos no contamos con servicio.\n\n🔍 Por favor, intenta con otra fecha o contacta directamente.` 
-        }));
-      }
-    }
     
     const workingHours = findWorkingHours(calendarNumber, sheetDayNumber, sheetData.hours);
     
     if (!workingHours) {
-      return res.json(createJsonResponse({ 
-        respuesta: '🚫 No hay servicio para la fecha seleccionada. Por favor, elige otra fecha.' 
-      }));
+      console.log(`⚠️ No hay servicio para la fecha inicial (${targetMoment.format('YYYY-MM-DD')}) - Continuando búsqueda de disponibilidad.`);
     }
     
     const buildAvailabilityResponse = (daysWithSlots) => {
@@ -1193,6 +1163,32 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
 
     const daysWithSlots = [];
 
+    const collectFallbackDays = async (startMoment, limit = 4, maxChecks = 25) => {
+      const fallbackDays = [];
+      let checked = 0;
+      let dayOffset = 1;
+      while (checked < maxChecks && fallbackDays.length < limit) {
+        const checkDate = startMoment.clone().add(dayOffset, 'days');
+        const jsDay = checkDate.toDate().getDay();
+        dayOffset++;
+        checked++;
+        if (jsDay === 0) {
+          continue;
+        }
+        const dayInfo = {
+          date: checkDate.toDate(),
+          label: 'proximo',
+          emoji: '📆',
+          priority: fallbackDays.length + 1
+        };
+        const dayResult = await evaluateDay(dayInfo);
+        if (dayResult) {
+          fallbackDays.push(dayResult);
+        }
+      }
+      return fallbackDays;
+    };
+
     if (isMultiDayRequest) {
       const maxDaysToCheck = daysParam + 21; // colchón para encontrar días disponibles
       let checked = 0;
@@ -1289,36 +1285,28 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       // 🚫 PROHIBICIÓN: No permitir domingos
       if (jsDay === 0) {
         console.log(`🚫 DOMINGO - No se permite agendar domingos`);
-        console.log(`🔍 Buscando próxima fecha disponible...`);
-        
-        // Buscar la próxima fecha disponible con slots
-        const nextAvailable = await findNextAvailableDateWithSlots(
-          targetMoment,
-          calendarNumber,
-          serviceNumber,
-          sheetData,
-          calendarId,
-          serviceDuration
-        );
-        
-        if (nextAvailable) {
-          const dayNameFormatted = formatDateToSpanishPremium(nextAvailable.date);
-          const time12h = formatTimeTo12Hour(nextAvailable.firstSlot);
-          return res.json(createJsonResponse({ 
-            respuesta: `😔 Los días domingos no contamos con servicio, puedes consultar el día **${dayNameFormatted}** (${nextAvailable.dateStr}) a las **${time12h}**.\n\n🔍 Esta es la próxima fecha y hora más cercana disponible en el calendario.` 
-          }));
-        } else {
-          return res.json(createJsonResponse({ 
-            respuesta: `😔 Los días domingos no contamos con servicio.\n\n🔍 Por favor, intenta con otra fecha o contacta directamente.` 
-          }));
+        console.log(`🔍 Buscando próximos días disponibles...`);
+
+        const fallbackDays = await collectFallbackDays(targetMoment);
+        if (fallbackDays.length > 0) {
+          return res.json(buildAvailabilityResponse(fallbackDays));
         }
+
+        return res.json(createJsonResponse({
+          respuesta: '😔 No encontré horarios disponibles en los próximos días. Por favor, intenta con otra fecha o más adelante.'
+        }));
       }
       
       const workingHours = findWorkingHours(calendarNumber, sheetDayNumber, sheetData.hours);
       
       if (!workingHours) {
-        return res.json(createJsonResponse({ 
-          respuesta: `🚫 No hay servicio para ${formatDateToSpanishPremium(targetDate)}. Por favor, elige otra fecha.` 
+        console.log(`⚠️ No hay servicio para la fecha solicitada - Buscando próximos días disponibles...`);
+        const fallbackDays = await collectFallbackDays(targetMoment);
+        if (fallbackDays.length > 0) {
+          return res.json(buildAvailabilityResponse(fallbackDays));
+        }
+        return res.json(createJsonResponse({
+          respuesta: '😔 No encontré horarios disponibles en los próximos días. Por favor, intenta con otra fecha o más adelante.'
         }));
       }
       
