@@ -2411,39 +2411,71 @@ app.post('/api/verificar-cliente-seleccion-hora', async (req, res) => {
     console.log('🔍 === VERIFICACIÓN DE CLIENTE DESPUÉS DE SELECCIÓN DE HORA ===');
     console.log('Body recibido:', JSON.stringify(req.body, null, 2));
 
-    const { telefono, horaSeleccionada, fechaSeleccionada, servicio } = req.body;
+    const {
+      telefono,
+      horaSeleccionada,
+      fechaSeleccionada,
+      servicio,
+      service,
+      serviceName,
+      date,
+      time
+    } = req.body;
 
-    if (!telefono) {
+    const horaFinal = horaSeleccionada || (time ? formatTimeTo12Hour(time) : null);
+    let fechaFinal = fechaSeleccionada || null;
+
+    if (!fechaFinal && date) {
+      const fechaMoment = moment.tz(date, 'YYYY-MM-DD', config.timezone.default);
+      if (fechaMoment.isValid()) {
+        fechaFinal = formatDateToSpanishPremium(fechaMoment.toDate());
+      }
+    }
+
+    const serviceMap = {
+      1: 'Consulta presencial',
+      2: 'Consulta en línea'
+    };
+    const serviceNumber = service !== undefined ? parseInt(service, 10) : null;
+    const serviceFinal = serviceName || servicio || (Number.isFinite(serviceNumber) ? serviceMap[serviceNumber] : null);
+
+    if (!horaFinal || !fechaFinal) {
       return res.json({
         success: false,
-        error: 'Teléfono no proporcionado',
-        tipoCliente: 'desconocido'
+        error: 'Faltan datos de fecha u hora seleccionada',
+        tipoCliente: 'desconocido',
+        mensaje: 'Para continuar, indícame la fecha y hora que prefieres 😊'
       });
     }
 
-    console.log(`📞 Buscando cliente con teléfono: ${telefono}`);
-    console.log(`⏰ Hora seleccionada: ${horaSeleccionada}`);
-    console.log(`📅 Fecha seleccionada: ${fechaSeleccionada}`);
+    if (telefono) {
+      console.log(`📞 Buscando cliente con teléfono: ${telefono}`);
+      console.log(`⏰ Hora seleccionada: ${horaFinal}`);
+      console.log(`📅 Fecha seleccionada: ${fechaFinal}`);
 
-    // Buscar en Google Sheets
-    const pacientesEncontrados = await consultaDatosPacientePorTelefono(telefono);
-    
-    console.log(`✅ Resultados encontrados: ${pacientesEncontrados.length}`);
+      // Buscar en Google Sheets
+      const pacientesEncontrados = await consultaDatosPacientePorTelefono(telefono);
+      
+      console.log(`✅ Resultados encontrados: ${pacientesEncontrados.length}`);
 
-    if (pacientesEncontrados && pacientesEncontrados.length > 0) {
-      console.log('✅ Cliente recurrente detectado (flujo tradicional activado)');
+      if (pacientesEncontrados && pacientesEncontrados.length > 0) {
+        console.log('✅ Cliente recurrente detectado (flujo tradicional activado)');
+      } else {
+        console.log('⚠️ Cliente nuevo detectado');
+      }
     } else {
-      console.log('⚠️ Cliente nuevo detectado');
+      console.log('⚠️ Teléfono no proporcionado, se continúa sin reconocimiento');
     }
     
     // Flujo tradicional: siempre pedir nombre, sin sugerir datos guardados
-    const mensajeNuevo = `¡Perfecto! Elegiste las ${horaSeleccionada} del ${fechaSeleccionada} 👍
+    const servicioTexto = serviceFinal ? ` para ${serviceFinal}` : '';
+    const mensajeNuevo = `¡Perfecto! Elegiste las ${horaFinal} del ${fechaFinal}${servicioTexto} 👍
 
 ¿Me puedes decir tu nombre para la reserva? 😊`;
 
     return res.json({
       success: true,
-      tipoCliente: 'nuevo',
+      tipoCliente: telefono ? 'nuevo' : 'desconocido',
       datosCliente: null,
       mensaje: mensajeNuevo,
       requiereDatosAdicionales: true
