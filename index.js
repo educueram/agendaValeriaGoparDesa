@@ -855,25 +855,39 @@ app.get('/', (req, res) => {
 app.get('/api/consulta-disponibilidad', async (req, res) => {
   try {
     console.log('🔍 === CONSULTA DISPONIBILIDAD ===');
-    const { service: serviceNumber, date: targetDateStr } = req.query;
+    const {
+      service: serviceNumberRaw,
+      date: targetDateStr,
+      codigo_reserva: codigoReservaRaw,
+      telefono: telefonoRaw
+    } = req.query;
     const calendarNumber = '1'; // Hardcodeado: siempre usar calendario 1
 
     const hasExplicitDate = Boolean(targetDateStr);
     const daysParamRaw = req.query?.days;
     const parsedDaysParam = daysParamRaw !== undefined ? parseInt(daysParamRaw, 10) : null;
-    const menuMode = req.query?.mode === 'menu'
+    let menuMode = req.query?.mode === 'menu'
       || req.query?.menu === '1'
       || req.query?.flow === 'menu'
       || req.query?.week === 'true';
-    const daysParam = Number.isFinite(parsedDaysParam) && parsedDaysParam > 0
+    let daysParam = Number.isFinite(parsedDaysParam) && parsedDaysParam > 0
       ? parsedDaysParam
       : (menuMode ? 4 : null);
+    const isRescheduleContext = Boolean(codigoReservaRaw || telefonoRaw);
+    if (!targetDateStr && !Number.isFinite(daysParam) && isRescheduleContext) {
+      daysParam = 4;
+    }
     const isMultiDayRequest = Number.isFinite(daysParam) && daysParam > 0;
+    if (isRescheduleContext && isMultiDayRequest) {
+      menuMode = true;
+    }
 
     console.log('Parámetros recibidos:', {
       calendarNumber: calendarNumber + ' (hardcodeado)',
-      serviceNumber,
+      serviceNumber: serviceNumberRaw,
       targetDateStr,
+      codigo_reserva: codigoReservaRaw,
+      telefono: telefonoRaw,
       days: daysParamRaw,
       mode: req.query?.mode,
       menu: req.query?.menu,
@@ -881,9 +895,9 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       week: req.query?.week
     });
 
-    if (!serviceNumber || (!targetDateStr && !isMultiDayRequest)) {
+    if (!targetDateStr && !isMultiDayRequest) {
       return res.json(createJsonResponse({ 
-        respuesta: '⚠️ Error: Faltan parámetros. Se requiere "service" y "date" (o "days").' 
+        respuesta: '⚠️ Error: Faltan parámetros. Se requiere "date" o "days".' 
       }));
     }
     
@@ -909,6 +923,55 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       sheetData = developmentMockData;
     }
 
+    const normalizeText = (value) => (value || '')
+      .toString()
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    const resolveServiceFromName = (serviceName, servicesData) => {
+      const normalizedTarget = normalizeText(serviceName);
+      if (!normalizedTarget) return null;
+      for (let i = 1; i < servicesData.length; i++) {
+        const row = servicesData[i] || [];
+        const match = row.some(cell => normalizeText(cell) === normalizedTarget);
+        if (match) {
+          const serviceNumber = row[0] ? row[0].toString().trim() : null;
+          const serviceDuration = row[1] ? row[1].toString().trim() : null;
+          return { serviceNumber, serviceDuration };
+        }
+      }
+      return null;
+    };
+
+    let serviceNumber = serviceNumberRaw ? serviceNumberRaw.toString().trim() : '';
+    let serviceDuration = null;
+
+    if (!serviceNumber) {
+      let inferredServiceName = '';
+      const codigoReserva = (codigoReservaRaw || '').toString().trim();
+      const telefono = (telefonoRaw || '').toString().trim();
+
+      if (codigoReserva) {
+        const clientData = await getClientDataByReservationCode(codigoReserva);
+        inferredServiceName = clientData?.serviceName || '';
+      }
+      if (!inferredServiceName && telefono) {
+        const upcomingAppointment = await findUpcomingAppointmentByPhone(telefono);
+        inferredServiceName = upcomingAppointment?.serviceName || '';
+      }
+
+      if (inferredServiceName) {
+        const resolved = resolveServiceFromName(inferredServiceName, sheetData.services);
+        if (resolved && resolved.serviceNumber && resolved.serviceDuration) {
+          serviceNumber = resolved.serviceNumber;
+          serviceDuration = resolved.serviceDuration;
+          console.log(`✅ Servicio inferido por cita previa: ${serviceNumber} (${inferredServiceName})`);
+        }
+      }
+    }
+
     const calendarId = findData(calendarNumber, sheetData.calendars, 0, 1);
     if (!calendarId) { 
       console.log(`❌ Calendario no encontrado: ${calendarNumber}`);
@@ -917,11 +980,13 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       })); 
     }
 
-    const serviceDuration = findData(serviceNumber, sheetData.services, 0, 1);
+    if (!serviceDuration && serviceNumber) {
+      serviceDuration = findData(serviceNumber, sheetData.services, 0, 1);
+    }
     if (!serviceDuration) { 
       console.log(`❌ Servicio no encontrado: ${serviceNumber}`);
       return res.json(createJsonResponse({ 
-        respuesta: '🚫 Error: El servicio solicitado no fue encontrado.' 
+        respuesta: '🚫 Error: El servicio solicitado no fue encontrado. Si estás reagendando, envía también el código de reserva o tu teléfono.' 
       })); 
     }
 
