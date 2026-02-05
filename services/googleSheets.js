@@ -73,25 +73,80 @@ function findData(query, data, searchCol, returnCol) {
  * Buscar horarios de trabajo (equivalente a findWorkingHours del código original)
  */
 function findWorkingHours(calendarNumber, dayNumber, data) {
-  const dayNames = { 1: "LUNES", 2: "MARTES", 3: "MIERCOLES", 4: "JUEVES", 5: "VIERNES", 6: "SABADO", 7: "DOMINGO" }; 
-  const expectedDayName = dayNames[dayNumber]; 
-  
-  for (let i = 1; i < data.length; i++) { 
+  const dayNames = { 1: "LUNES", 2: "MARTES", 3: "MIERCOLES", 4: "JUEVES", 5: "VIERNES", 6: "SABADO", 7: "DOMINGO" };
+  const expectedDayName = dayNames[dayNumber];
+
+  const buildFixedSchedule = () => {
+    const isSaturday = dayNumber === 6;
+    const isSunday = dayNumber === 7;
+
+    if (isSunday) {
+      if (config.workingHours.sunday && config.workingHours.sunday.enabled) {
+        return {
+          start: config.workingHours.startHour,
+          end: config.workingHours.endHour,
+          dayName: expectedDayName,
+          hasLunch: true,
+          lunchStart: config.workingHours.lunchStartHour,
+          lunchEnd: config.workingHours.lunchEndHour
+        };
+      }
+      return null;
+    }
+
+    if (isSaturday) {
+      return {
+        start: config.workingHours.saturday.startHour,
+        end: config.workingHours.saturday.endHour,
+        dayName: expectedDayName,
+        hasLunch: false,
+        lunchStart: null,
+        lunchEnd: null
+      };
+    }
+
+    return {
+      start: config.workingHours.startHour,
+      end: config.workingHours.endHour,
+      dayName: expectedDayName,
+      hasLunch: true,
+      lunchStart: config.workingHours.lunchStartHour,
+      lunchEnd: config.workingHours.lunchEndHour
+    };
+  };
+
+  if (config.workingHours.forceFixedSchedule) {
+    return buildFixedSchedule();
+  }
+
+  for (let i = 1; i < data.length; i++) {
     const sheetCalendar = data[i][0] ? data[i][0].toString().trim() : '';
-    if (sheetCalendar === calendarNumber) { 
+    if (sheetCalendar === calendarNumber) {
       const sheetDayValue = data[i][1] ? data[i][1].toString().trim() : '';
-      const normalizedSheetDay = sheetDayValue.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); 
-      
-      if (sheetDayValue === dayNumber.toString() || normalizedSheetDay === expectedDayName) { 
-        return { 
-          start: parseInt(data[i][2]), 
-          end: parseInt(data[i][3]), 
-          dayName: sheetDayValue 
-        }; 
-      } 
-    } 
-  } 
-  return null;
+      const normalizedSheetDay = sheetDayValue.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      if (sheetDayValue === dayNumber.toString() || normalizedSheetDay === expectedDayName) {
+        const start = parseInt(data[i][2]);
+        const end = parseInt(data[i][3]);
+        const isSaturday = dayNumber === 6;
+        const isSunday = dayNumber === 7;
+        if (isSunday && !(config.workingHours.sunday && config.workingHours.sunday.enabled)) {
+          return null;
+        }
+        return {
+          start,
+          end,
+          dayName: sheetDayValue,
+          hasLunch: !isSaturday && !isSunday,
+          lunchStart: isSaturday || isSunday ? null : config.workingHours.lunchStartHour,
+          lunchEnd: isSaturday || isSunday ? null : config.workingHours.lunchEndHour
+        };
+      }
+    }
+  }
+
+  // Fallback a horario fijo si la hoja no tiene el día configurado
+  return buildFixedSchedule();
 }
 
 /**
