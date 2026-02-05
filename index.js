@@ -977,180 +977,218 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     // NUEVA LÓGICA: Consultar varios días según el modo
     // Si la fecha solicitada es hoy o en el futuro, empezar desde ahí
     // Si es en el pasado, empezar desde hoy
-    const datesToCheck = [];
-    const totalDaysRequired = isMultiDayRequest ? daysParam : 2; // Multidía o: día solicitado + 1 día más
-    const maxDaysToCheck = totalDaysRequired + 7; // Colchón para saltar domingos
-    
-    let daysAdded = 0;
-    for (let i = 0; i < maxDaysToCheck && daysAdded < totalDaysRequired; i++) {
-      const checkDate = startDate.clone().add(i, 'days');
-      const jsDay = checkDate.toDate().getDay();
-      
-      // Saltar domingos (día 0)
-      if (jsDay === 0) {
-        continue;
-      }
-      
-      const isRequestedDay = hasExplicitDate && i === 0;
-      datesToCheck.push({
-        date: checkDate.toDate(),
-        label: isRequestedDay ? 'solicitado' : 'proximo',
-        emoji: isRequestedDay ? '📅' : '📆',
-        priority: daysAdded + 1
-      });
-      daysAdded++;
-    }
-    
-    console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS ===`);
-    console.log(`📅 Fecha inicial: ${startDate.format('YYYY-MM-DD')} (${startDate.format('dddd')})`);
-    console.log(`📅 Días a consultar: ${datesToCheck.length}`);
-    datesToCheck.forEach((day, idx) => {
-      const dayMoment = moment(day.date).tz(config.timezone.default);
-      console.log(`   ${idx + 1}. ${dayMoment.format('YYYY-MM-DD')} (${dayMoment.format('dddd')})`);
-    });
-    
-    const daysWithSlots = [];
-    
-    for (const dayInfo of datesToCheck) {
+    const evaluateDay = async (dayInfo) => {
       const dayMoment = moment(dayInfo.date).tz(config.timezone.default);
       const dateStr = dayMoment.format('YYYY-MM-DD');
       
       console.log(`🔍 Evaluando día ${dayInfo.label}: ${dateStr} (hoy: ${today.format('YYYY-MM-DD')})`);
       
       // Solo procesar días que no sean en el pasado
-      if (dayMoment.isSameOrAfter(today, 'day')) {
-        try {
-          const jsDay = dayInfo.date.getDay();
-          const sheetDayNumber = (jsDay === 0) ? 7 : jsDay;
-          const workingHours = findWorkingHours(calendarNumber, sheetDayNumber, sheetData.hours);
+      if (!dayMoment.isSameOrAfter(today, 'day')) {
+        return null;
+      }
 
-          if (!workingHours) {
-            console.log(`   ⚠️ No se encontraron horarios laborales para ${dateStr} (día ${sheetDayNumber})`);
-            continue;
-          }
+      try {
+        const jsDay = dayInfo.date.getDay();
+        const sheetDayNumber = (jsDay === 0) ? 7 : jsDay;
+        const workingHours = findWorkingHours(calendarNumber, sheetDayNumber, sheetData.hours);
 
-          if (workingHours) {
-          // CORRECCIÓN: Validar que no sea domingo (prohibido agendar)
-          const isSaturday = jsDay === 6;
-          const isSunday = jsDay === 0;
-          
-          // 🚫 PROHIBICIÓN: No permitir domingos
-          if (isSunday) {
-            console.log(`   🚫 DOMINGO - Saltando día (domingo no permitido)`);
-            continue;
-          }
-          
-          // CORRECCIÓN: Horario según el día de la semana
-          let correctedHours;
-          if (isSaturday) {
-            // SÁBADO: Horario especial fijo 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
-            correctedHours = {
-              start: config.workingHours.saturday.startHour || 10,
-              end: config.workingHours.saturday.endHour || 14, // 2 PM (14:00)
-              dayName: workingHours.dayName,
-              hasLunch: false,
-              lunchStart: null,
-              lunchEnd: null
-            };
-            console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
-          } else {
-            // DÍAS NORMALES: SI O SI 10 AM a 6 PM
-            correctedHours = {
-              start: 10, // FORZADO: Siempre 10 AM
-              end: 18,   // FORZADO: Siempre 6 PM (18:00)
-              dayName: workingHours.dayName,
-              hasLunch: true,
-              lunchStart: config.workingHours.lunchStartHour || 14,
-              lunchEnd: config.workingHours.lunchEndHour || 15
-            };
-          }
-          
-          console.log(`📅 Procesando día ${dayInfo.label}: ${dateStr}`);
-          console.log(`   - Horario original: ${workingHours.start}:00 - ${workingHours.end}:00`);
-          console.log(`   - Horario corregido: ${correctedHours.start}:00 - ${correctedHours.end}:00`);
-          console.log(`   - Horario comida: ${correctedHours.hasLunch ? `${correctedHours.lunchStart}:00-${correctedHours.lunchEnd}:00` : 'No aplica'}`);
-          
-          // CORRECCIÓN: Calcular total slots posibles (horario laboral completo)
-          // Incluir el slot de la última hora (6 PM) como última sesión
-          const totalPossibleSlots = correctedHours.end - correctedHours.start + 1;
-          
-          console.log(`   📊 Total slots posibles: ${totalPossibleSlots} (de ${correctedHours.start}:00 a ${correctedHours.end}:00)`);
-          
-          let availableSlots = [];
-          
-          try {
-            
-            // Intentar usar Google Calendar API real
-            const slotResult = await findAvailableSlots(calendarId, dayInfo.date, parseInt(serviceDuration), correctedHours);
-            
-            if (typeof slotResult === 'object' && slotResult.slots !== undefined) {
-              availableSlots = slotResult.slots;
-            } else {
-              availableSlots = slotResult;
-            }
-          } catch (error) {
-            console.error(`   ❌ ERROR consultando calendar real:`, error.message);
-            console.error(`   Stack:`, error.stack);
-            console.log(`⚠️ Error consultando calendar real, usando mock: ${error.message}`);
-            const mockResult = mockFindAvailableSlots(calendarId, dayInfo.date, parseInt(serviceDuration), correctedHours);
-            
-            if (typeof mockResult === 'object' && mockResult.slots !== undefined) {
-              availableSlots = mockResult.slots;
-            } else {
-              availableSlots = mockResult;
-            }
-          }
-          
-          // CORRECCIÓN CRÍTICA: Validar que el resultado sea válido
-          if (!Array.isArray(availableSlots)) {
-            console.error(`   ⚠️ ADVERTENCIA: availableSlots no es un array, es: ${typeof availableSlots}`);
-            console.error(`   ⚠️ Valor recibido:`, availableSlots);
-            availableSlots = [];
-          }
-          
-          const occupiedSlots = totalPossibleSlots - availableSlots.length;
-          const occupationPercentage = totalPossibleSlots > 0 ? Math.round((occupiedSlots / totalPossibleSlots) * 100) : 0;
-          
-          console.log(`   - Total slots posibles: ${totalPossibleSlots}, Disponibles: ${availableSlots.length}, Ocupación: ${occupationPercentage}%`);
-          console.log(`   - Slots encontrados: [${availableSlots.join(', ')}]`);
-          
-          // CORRECCIÓN CRÍTICA: Si no hay slots pero debería haber, investigar
-          if (availableSlots.length === 0 && totalPossibleSlots > 0) {
-            console.error(`   ⚠️ ADVERTENCIA: No se encontraron slots disponibles pero hay ${totalPossibleSlots} slots posibles`);
-            console.error(`   ⚠️ Esto puede indicar un problema con la detección de conflictos o con la generación de slots`);
-            console.error(`   ⚠️ Revisar logs anteriores para identificar la causa`);
-          }
-          
-          if (availableSlots.length > 0) {
-            const dayWithSlots = {
-              date: dayInfo.date,
-              dateStr: dateStr,
-              slots: availableSlots,
-              label: dayInfo.label,
-              emoji: dayInfo.emoji,
-              priority: dayInfo.priority,
-              stats: {
-                totalSlots: totalPossibleSlots,
-                availableSlots: availableSlots.length,
-                occupiedSlots: occupiedSlots,
-                occupationPercentage: occupationPercentage
-              }
-            };
-            
-            daysWithSlots.push(dayWithSlots);
-            console.log(`   ✅ Día agregado a daysWithSlots: ${dayInfo.label} con ${availableSlots.length} slots`);
-            console.log(`      Slots agregados: [${availableSlots.join(', ')}]`);
-          } else {
-            console.log(`   ❌ Día NO agregado: ${dayInfo.label} - availableSlots.length = 0`);
-          }
-        } else {
-          console.log(`   ⚠️ No se encontraron horarios laborales para ${dateStr}`);
+        if (!workingHours) {
+          console.log(`   ⚠️ No se encontraron horarios laborales para ${dateStr} (día ${sheetDayNumber})`);
+          return null;
         }
-        } catch (dayError) {
-          console.error(`   ❌ Error procesando día ${dateStr}:`, dayError.message);
-          console.error(`   Stack:`, dayError.stack);
-          // Continuar con el siguiente día en lugar de fallar completamente
+
+        // CORRECCIÓN: Validar que no sea domingo (prohibido agendar)
+        const isSaturday = jsDay === 6;
+        const isSunday = jsDay === 0;
+        
+        // 🚫 PROHIBICIÓN: No permitir domingos
+        if (isSunday) {
+          console.log(`   🚫 DOMINGO - Saltando día (domingo no permitido)`);
+          return null;
+        }
+        
+        // CORRECCIÓN: Horario según el día de la semana
+        let correctedHours;
+        if (isSaturday) {
+          // SÁBADO: Horario especial fijo 10 AM - 2 PM (última sesión: 2 PM - 3 PM)
+          correctedHours = {
+            start: config.workingHours.saturday.startHour || 10,
+            end: config.workingHours.saturday.endHour || 14, // 2 PM (14:00)
+            dayName: workingHours.dayName,
+            hasLunch: false,
+            lunchStart: null,
+            lunchEnd: null
+          };
+          console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
+        } else {
+          // DÍAS NORMALES: SI O SI 10 AM a 6 PM
+          correctedHours = {
+            start: 10, // FORZADO: Siempre 10 AM
+            end: 18,   // FORZADO: Siempre 6 PM (18:00)
+            dayName: workingHours.dayName,
+            hasLunch: true,
+            lunchStart: config.workingHours.lunchStartHour || 14,
+            lunchEnd: config.workingHours.lunchEndHour || 15
+          };
+        }
+        
+        console.log(`📅 Procesando día ${dayInfo.label}: ${dateStr}`);
+        console.log(`   - Horario original: ${workingHours.start}:00 - ${workingHours.end}:00`);
+        console.log(`   - Horario corregido: ${correctedHours.start}:00 - ${correctedHours.end}:00`);
+        console.log(`   - Horario comida: ${correctedHours.hasLunch ? `${correctedHours.lunchStart}:00-${correctedHours.lunchEnd}:00` : 'No aplica'}`);
+        
+        // CORRECCIÓN: Calcular total slots posibles (horario laboral completo)
+        // Incluir el slot de la última hora (6 PM) como última sesión
+        const totalPossibleSlots = correctedHours.end - correctedHours.start + 1;
+        
+        console.log(`   📊 Total slots posibles: ${totalPossibleSlots} (de ${correctedHours.start}:00 a ${correctedHours.end}:00)`);
+        
+        let availableSlots = [];
+        
+        try {
+          // Intentar usar Google Calendar API real
+          const slotResult = await findAvailableSlots(calendarId, dayInfo.date, parseInt(serviceDuration), correctedHours);
+          
+          if (typeof slotResult === 'object' && slotResult.slots !== undefined) {
+            availableSlots = slotResult.slots;
+          } else {
+            availableSlots = slotResult;
+          }
+        } catch (error) {
+          console.error(`   ❌ ERROR consultando calendar real:`, error.message);
+          console.error(`   Stack:`, error.stack);
+          console.log(`⚠️ Error consultando calendar real, usando mock: ${error.message}`);
+          const mockResult = mockFindAvailableSlots(calendarId, dayInfo.date, parseInt(serviceDuration), correctedHours);
+          
+          if (typeof mockResult === 'object' && mockResult.slots !== undefined) {
+            availableSlots = mockResult.slots;
+          } else {
+            availableSlots = mockResult;
+          }
+        }
+        
+        // CORRECCIÓN CRÍTICA: Validar que el resultado sea válido
+        if (!Array.isArray(availableSlots)) {
+          console.error(`   ⚠️ ADVERTENCIA: availableSlots no es un array, es: ${typeof availableSlots}`);
+          console.error(`   ⚠️ Valor recibido:`, availableSlots);
+          availableSlots = [];
+        }
+        
+        const occupiedSlots = totalPossibleSlots - availableSlots.length;
+        const occupationPercentage = totalPossibleSlots > 0 ? Math.round((occupiedSlots / totalPossibleSlots) * 100) : 0;
+        
+        console.log(`   - Total slots posibles: ${totalPossibleSlots}, Disponibles: ${availableSlots.length}, Ocupación: ${occupationPercentage}%`);
+        console.log(`   - Slots encontrados: [${availableSlots.join(', ')}]`);
+        
+        // CORRECCIÓN CRÍTICA: Si no hay slots pero debería haber, investigar
+        if (availableSlots.length === 0 && totalPossibleSlots > 0) {
+          console.error(`   ⚠️ ADVERTENCIA: No se encontraron slots disponibles pero hay ${totalPossibleSlots} slots posibles`);
+          console.error(`   ⚠️ Esto puede indicar un problema con la detección de conflictos o con la generación de slots`);
+          console.error(`   ⚠️ Revisar logs anteriores para identificar la causa`);
+        }
+        
+        if (availableSlots.length > 0) {
+          const dayWithSlots = {
+            date: dayInfo.date,
+            dateStr: dateStr,
+            slots: availableSlots,
+            label: dayInfo.label,
+            emoji: dayInfo.emoji,
+            priority: dayInfo.priority,
+            stats: {
+              totalSlots: totalPossibleSlots,
+              availableSlots: availableSlots.length,
+              occupiedSlots: occupiedSlots,
+              occupationPercentage: occupationPercentage
+            }
+          };
+          
+          console.log(`   ✅ Día agregado a daysWithSlots: ${dayInfo.label} con ${availableSlots.length} slots`);
+          console.log(`      Slots agregados: [${availableSlots.join(', ')}]`);
+          return dayWithSlots;
+        }
+        
+        console.log(`   ❌ Día NO agregado: ${dayInfo.label} - availableSlots.length = 0`);
+        return null;
+      } catch (dayError) {
+        console.error(`   ❌ Error procesando día ${dateStr}:`, dayError.message);
+        console.error(`   Stack:`, dayError.stack);
+        // Continuar con el siguiente día en lugar de fallar completamente
+        return null;
+      }
+    };
+
+    const daysWithSlots = [];
+
+    if (isMultiDayRequest) {
+      const maxDaysToCheck = daysParam + 21; // colchón para encontrar días disponibles
+      let checked = 0;
+      let dayOffset = 0;
+      
+      console.log(`📊 === CONSULTA PARA ENCONTRAR ${daysParam} DÍAS DISPONIBLES ===`);
+      console.log(`📅 Fecha inicial: ${startDate.format('YYYY-MM-DD')} (${startDate.format('dddd')})`);
+      
+      while (checked < maxDaysToCheck && daysWithSlots.length < daysParam) {
+        const checkDate = startDate.clone().add(dayOffset, 'days');
+        const jsDay = checkDate.toDate().getDay();
+        dayOffset++;
+        checked++;
+
+        // Saltar domingos (día 0)
+        if (jsDay === 0) {
           continue;
+        }
+
+        const dayInfo = {
+          date: checkDate.toDate(),
+          label: 'proximo',
+          emoji: '📆',
+          priority: checked
+        };
+
+        const dayResult = await evaluateDay(dayInfo);
+        if (dayResult) {
+          daysWithSlots.push(dayResult);
+        }
+      }
+    } else {
+      const datesToCheck = [];
+      const totalDaysRequired = 2; // día solicitado + 1 día más
+      const maxDaysToCheck = totalDaysRequired + 7; // Colchón para saltar domingos
+      
+      let daysAdded = 0;
+      for (let i = 0; i < maxDaysToCheck && daysAdded < totalDaysRequired; i++) {
+        const checkDate = startDate.clone().add(i, 'days');
+        const jsDay = checkDate.toDate().getDay();
+        
+        // Saltar domingos (día 0)
+        if (jsDay === 0) {
+          continue;
+        }
+        
+        const isRequestedDay = hasExplicitDate && i === 0;
+        datesToCheck.push({
+          date: checkDate.toDate(),
+          label: isRequestedDay ? 'solicitado' : 'proximo',
+          emoji: isRequestedDay ? '📅' : '📆',
+          priority: daysAdded + 1
+        });
+        daysAdded++;
+      }
+      
+      console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS ===`);
+      console.log(`📅 Fecha inicial: ${startDate.format('YYYY-MM-DD')} (${startDate.format('dddd')})`);
+      console.log(`📅 Días a consultar: ${datesToCheck.length}`);
+      datesToCheck.forEach((day, idx) => {
+        const dayMoment = moment(day.date).tz(config.timezone.default);
+        console.log(`   ${idx + 1}. ${dayMoment.format('YYYY-MM-DD')} (${dayMoment.format('dddd')})`);
+      });
+
+      for (const dayInfo of datesToCheck) {
+        const dayResult = await evaluateDay(dayInfo);
+        if (dayResult) {
+          daysWithSlots.push(dayResult);
         }
       }
     }
@@ -1162,6 +1200,12 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     });
     
     if (daysWithSlots.length === 0) {
+      if (isMultiDayRequest) {
+        return res.json(createJsonResponse({ 
+          respuesta: '😔 No encontré horarios disponibles en los próximos días. Por favor, intenta con una fecha específica o más adelante.' 
+        }));
+      }
+
       // CORRECCIÓN: Solo buscar el día específico solicitado, NO días alternativos
       console.log(`\n🔍 === NO HAY DISPONIBILIDAD EN ${targetDateStr} ===`);
       console.log(`📅 Buscando únicamente el día solicitado: ${targetMoment.format('YYYY-MM-DD')} (${targetMoment.format('dddd')})`);
