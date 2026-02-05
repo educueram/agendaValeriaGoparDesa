@@ -860,14 +860,25 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
 
     const hasExplicitDate = Boolean(targetDateStr);
     const daysParamRaw = req.query?.days;
-    const daysParam = daysParamRaw !== undefined ? parseInt(daysParamRaw, 10) : null;
-    const isMultiDayRequest = !hasExplicitDate && Number.isFinite(daysParam) && daysParam > 0;
+    const parsedDaysParam = daysParamRaw !== undefined ? parseInt(daysParamRaw, 10) : null;
+    const menuMode = req.query?.mode === 'menu'
+      || req.query?.menu === '1'
+      || req.query?.flow === 'menu'
+      || req.query?.week === 'true';
+    const daysParam = Number.isFinite(parsedDaysParam) && parsedDaysParam > 0
+      ? parsedDaysParam
+      : (menuMode ? 4 : null);
+    const isMultiDayRequest = Number.isFinite(daysParam) && daysParam > 0;
 
     console.log('Parámetros recibidos:', {
       calendarNumber: calendarNumber + ' (hardcodeado)',
       serviceNumber,
       targetDateStr,
-      days: daysParamRaw
+      days: daysParamRaw,
+      mode: req.query?.mode,
+      menu: req.query?.menu,
+      flow: req.query?.flow,
+      week: req.query?.week
     });
 
     if (!serviceNumber || (!targetDateStr && !isMultiDayRequest)) {
@@ -877,7 +888,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     }
     
     const today = moment().tz(config.timezone.default).startOf('day');
-    const normalizedTargetDateStr = targetDateStr || today.format('YYYY-MM-DD');
+    const normalizedTargetDateStr = (!menuMode && targetDateStr) ? targetDateStr : today.format('YYYY-MM-DD');
 
     // Parsear fecha directamente en zona horaria de México para evitar desajustes
     const targetMoment = moment.tz(normalizedTargetDateStr, 'YYYY-MM-DD', config.timezone.default);
@@ -922,7 +933,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     console.log(`   - Hoy: ${today.format('YYYY-MM-DD')}`);
     console.log(`   - Fecha solicitada: ${targetMoment.format('YYYY-MM-DD')}`);
     if (isMultiDayRequest) {
-      console.log(`   - Modo multidia: ${daysParam} días (sin fecha explícita)`);
+      console.log(`   - Modo multidia: ${daysParam} días ${menuMode ? '(menu/semana)' : '(sin fecha explícita)'}`);
     }
     
     // Validar que no sea una fecha en el pasado
