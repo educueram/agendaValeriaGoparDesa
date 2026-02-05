@@ -985,6 +985,67 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       }));
     }
     
+    const buildAvailabilityResponse = (daysWithSlots) => {
+      daysWithSlots.sort((a, b) => a.priority - b.priority);
+
+      let responseText = '📅 *Estas son las fechas que tenemos disponibles:*\n\n';
+      
+      const totalSlotsAvailable = daysWithSlots.reduce((sum, day) => sum + day.stats.availableSlots, 0);
+      const avgOccupation = Math.round(daysWithSlots.reduce((sum, day) => sum + day.stats.occupationPercentage, 0) / daysWithSlots.length);
+      
+      let letterIndex = 0;
+      const dateMapping = {};
+      
+      for (const dayData of daysWithSlots) {
+        const dayMoment = moment(dayData.date).tz(config.timezone.default);
+        const dayName = formatDateToSpanishPremium(dayMoment.toDate());
+        const correctDateStr = dayMoment.format('YYYY-MM-DD');
+        const dayLabelRaw = dayMoment.format('dddd D [de] MMMM');
+        const dayLabel = dayLabelRaw.charAt(0).toUpperCase() + dayLabelRaw.slice(1);
+
+        responseText += '━━━━━━━━━━━━━━━━━━━━━\n\n';
+        responseText += `🗓️ *${dayLabel}*\n`;
+
+        const formattedSlots = dayData.slots.map((slot) => {
+          const letter = String.fromCharCode(65 + letterIndex);
+          const time12h = formatTimeTo12Hour(slot);
+          
+          dateMapping[letter] = {
+            date: correctDateStr,
+            time: slot,
+            dayName: dayName
+          };
+          
+          letterIndex++;
+          return {
+            display: `${getCircledLetter(letter)} ${time12h}`
+          };
+        });
+
+        responseText += `${formatSlotsForWhatsApp(formattedSlots)}\n\n`;
+      }
+
+      responseText += `💡 Escribe la letra del horario que prefieras`;
+      if (isMultiDayRequest && menuMode) {
+        responseText += `\nTambien puedes preguntar por una fecha en especifico`;
+      }
+
+      return createJsonResponse({ 
+        respuesta: responseText,
+        metadata: {
+          totalDays: daysWithSlots.length,
+          totalSlots: totalSlotsAvailable,
+          averageOccupation: avgOccupation,
+          dateMapping: dateMapping,
+          recommendations: {
+            hasEarlierDay: false,
+            hasHighDemandDay: false,
+            hasLowDemandDay: false
+          }
+        }
+      });
+    };
+
     // NUEVA LÓGICA: Consultar varios días según el modo
     // Si la fecha solicitada es hoy o en el futuro, empezar desde ahí
     // Si es en el pasado, empezar desde hoy
@@ -1347,31 +1408,40 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
         }
         
         if (availableSlots.length === 0) {
-          const dayName = formatDateToSpanishPremium(targetDate);
           console.error(`   ❌ Finalmente no hay slots disponibles para ${targetDateStr}`);
-          console.log(`🔍 Día sin disponibilidad - Buscando próxima fecha disponible...`);
-          
-          // Buscar la próxima fecha disponible con slots
-          const nextAvailable = await findNextAvailableDateWithSlots(
-            targetMoment,
-            calendarNumber,
-            serviceNumber,
-            sheetData,
-            calendarId,
-            serviceDuration
-          );
-          
-          if (nextAvailable) {
-            const nextDayNameFormatted = formatDateToSpanishPremium(nextAvailable.date);
-            const time12h = formatTimeTo12Hour(nextAvailable.firstSlot);
-            return res.json(createJsonResponse({ 
-              respuesta: `😔 No tengo horarios disponibles para *${dayName}* (${targetDateStr}).\n\n🔍 Te recomiendo el día **${nextDayNameFormatted}** (${nextAvailable.dateStr}) a las **${time12h}**.\n\n📅 Esta es la próxima fecha y hora más cercana disponible en el calendario.` 
-            }));
-          } else {
-            return res.json(createJsonResponse({ 
-              respuesta: `😔 No tengo horarios disponibles para *${dayName}* (${targetDateStr}).\n\n🔍 Te sugerimos elegir otra fecha o contactarnos directamente.` 
-            }));
+          console.log(`🔍 Día sin disponibilidad - Buscando próximos días disponibles...`);
+
+          const fallbackDays = [];
+          let checked = 0;
+          let dayOffset = 1;
+          const maxChecks = 25;
+          while (checked < maxChecks && fallbackDays.length < 4) {
+            const checkDate = targetMoment.clone().add(dayOffset, 'days');
+            const jsDay = checkDate.toDate().getDay();
+            dayOffset++;
+            checked++;
+            if (jsDay === 0) {
+              continue;
+            }
+            const dayInfo = {
+              date: checkDate.toDate(),
+              label: 'proximo',
+              emoji: '📆',
+              priority: fallbackDays.length + 1
+            };
+            const dayResult = await evaluateDay(dayInfo);
+            if (dayResult) {
+              fallbackDays.push(dayResult);
+            }
           }
+
+          if (fallbackDays.length > 0) {
+            return res.json(buildAvailabilityResponse(fallbackDays));
+          }
+
+          return res.json(createJsonResponse({ 
+            respuesta: `😔 No encontré horarios disponibles en los próximos días. Por favor, intenta con otra fecha o más adelante.` 
+          }));
         }
         
         // Si hay slots disponibles, agregarlos a daysWithSlots
@@ -1409,90 +1479,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       }
     }
     
-    daysWithSlots.sort((a, b) => a.priority - b.priority);
-    
-    //let responseText = `🔥 ¡${daysWithSlots.length} ${daysWithSlots.length === 1 ? 'día' : 'días'} con disponibilidad encontrada!\n\n`;
-    let responseText = '📅 *Estas son las fechas que tenemos disponibles:*\n\n';
-    
-    const totalSlotsAvailable = daysWithSlots.reduce((sum, day) => sum + day.stats.availableSlots, 0);
-    const avgOccupation = Math.round(daysWithSlots.reduce((sum, day) => sum + day.stats.occupationPercentage, 0) / daysWithSlots.length);
-    
-    //responseText += `📊 *Resumen:* ${totalSlotsAvailable} horarios disponibles • ${avgOccupation}% ocupación promedio\n\n`;
-    
-    let letterIndex = 0;
-    let dateMapping = {};
-    
-    // Formatear mensaje con todos los días en formato más visual
-    for (const dayData of daysWithSlots) {
-      // CORRECCIÓN: Asegurar que se use la fecha correcta con zona horaria
-      const dayMoment = moment(dayData.date).tz(config.timezone.default);
-      const dayName = formatDateToSpanishPremium(dayMoment.toDate());
-      
-      // CORRECCIÓN: Usar fecha formateada correctamente
-      const correctDateStr = dayMoment.format('YYYY-MM-DD');
-      
-      const dayLabelRaw = dayMoment.format('dddd D [de] MMMM');
-      const dayLabel = dayLabelRaw.charAt(0).toUpperCase() + dayLabelRaw.slice(1);
-
-      responseText += '━━━━━━━━━━━━━━━━━━━━━\n\n';
-      responseText += `🗓️ *${dayLabel}*\n`;
-
-      const formattedSlots = dayData.slots.map((slot) => {
-        const letter = String.fromCharCode(65 + letterIndex); // A, B, C, etc.
-        const time12h = formatTimeTo12Hour(slot);
-        
-        dateMapping[letter] = {
-          date: correctDateStr, // Usar fecha corregida
-          time: slot,
-          dayName: dayName
-        };
-        
-        letterIndex++;
-        return {
-          display: `${getCircledLetter(letter)} ${time12h}`
-        };
-      });
-
-      responseText += `${formatSlotsForWhatsApp(formattedSlots)}\n\n`;
-    }
-    
-    const hasEarlierDay = daysWithSlots.some(day => day.label === 'anterior');
-    const hasHighDemandDay = daysWithSlots.some(day => day.stats.occupationPercentage >= 70);
-    const hasLowDemandDay = daysWithSlots.some(day => day.stats.occupationPercentage <= 30);
-    
-    /*
-    if (hasEarlierDay) {
-      responseText += `⚡ *¡Oportunidad!* Hay espacios anteriores disponibles - ¡agenda antes! 💰\n`;
-    }
-    
-    if (hasHighDemandDay) {
-      responseText += `🔥 *¡Urgente!* Algunos días tienen alta demanda - ¡reserva rápido!\n`;
-    }
-    
-    if (hasLowDemandDay) {
-      responseText += `✈️ *¡Perfecto!* Algunos días tienen excelente disponibilidad\n`;
-    }
-      */
-    
-    responseText += `💡 Escribe la letra del horario que prefieras`;
-    if (isMultiDayRequest && !hasExplicitDate) {
-      responseText += `\nTambien puedes preguntar por una fecha en especifico`;
-    }
-    
-    return res.json(createJsonResponse({ 
-      respuesta: responseText,
-      metadata: {
-        totalDays: daysWithSlots.length,
-        totalSlots: totalSlotsAvailable,
-        averageOccupation: avgOccupation,
-        dateMapping: dateMapping,
-        recommendations: {
-          hasEarlierDay: hasEarlierDay,
-          hasHighDemandDay: hasHighDemandDay,
-          hasLowDemandDay: hasLowDemandDay
-        }
-      }
-    }));
+    return res.json(buildAvailabilityResponse(daysWithSlots));
 
   } catch (error) {
     console.error('❌ === ERROR EN CONSULTA DISPONIBILIDAD ===');
