@@ -69,30 +69,42 @@ async function findAvailableSlots(calendarId, date, durationMinutes, hours) {
     const events = response.data.items || [];
     console.log(`📋 Eventos encontrados: ${events.length}`);
     
-    // Convertir eventos a formato simple de horas ocupadas
-    const occupiedHours = new Set();
-    const targetDateStr = dateMoment.format('YYYY-MM-DD');
-    
+    // Convertir eventos a un formato con tiempos exactos para detectar solapes reales
+    const busyEvents = [];
     events.forEach(event => {
       try {
-        const eventStart = moment.tz(event.start.dateTime || event.start.date, config.timezone.default);
-        const eventEnd = moment.tz(event.end.dateTime || event.end.date, config.timezone.default);
-        
-        // Solo considerar eventos del mismo día
-        if (eventStart.format('YYYY-MM-DD') !== targetDateStr) return;
-        
-        // Marcar cada hora que el evento ocupa
-        let currentHour = eventStart.hour();
-        const endHour = eventEnd.hour();
-        
-        while (currentHour < endHour && currentHour <= workingHours.end) {
-          if (currentHour >= workingHours.start) {
-            occupiedHours.add(currentHour);
-            console.log(`🚫 Hora ocupada: ${currentHour}:00 (${event.summary || 'Sin título'})`);
-          }
-          currentHour++;
+        let eventStart;
+        let eventEnd;
+
+        if (event.start?.dateTime) {
+          eventStart = moment.parseZone(event.start.dateTime).tz(config.timezone.default);
+        } else if (event.start?.date) {
+          eventStart = moment.tz(event.start.date, 'YYYY-MM-DD', config.timezone.default).startOf('day');
         }
-        
+
+        if (event.end?.dateTime) {
+          eventEnd = moment.parseZone(event.end.dateTime).tz(config.timezone.default);
+        } else if (event.end?.date) {
+          // end.date es exclusivo en eventos de día completo
+          eventEnd = moment.tz(event.end.date, 'YYYY-MM-DD', config.timezone.default).startOf('day');
+        }
+
+        if (!eventStart || !eventEnd || !eventStart.isValid() || !eventEnd.isValid()) {
+          return;
+        }
+
+        eventStart = eventStart.clone().second(0).millisecond(0);
+        eventEnd = eventEnd.clone().second(0).millisecond(0);
+
+        if (eventEnd.isSameOrBefore(startOfDay) || eventStart.isSameOrAfter(endOfDay)) {
+          return;
+        }
+
+        busyEvents.push({
+          start: eventStart,
+          end: eventEnd,
+          summary: event.summary || 'Sin título'
+        });
       } catch (error) {
         console.warn(`⚠️ Error procesando evento: ${error.message}`);
       }
@@ -109,17 +121,20 @@ async function findAvailableSlots(calendarId, date, durationMinutes, hours) {
         console.log(`❌ Slot ${hour}:00 en horario de comida`);
         continue;
       }
-      // Verificar si está ocupado
-      if (occupiedHours.has(hour)) {
+      const slotStart = dateMoment.clone().hour(hour).minute(0).second(0).millisecond(0);
+      const slotEnd = slotStart.clone().add(1, 'hour');
+
+      // Verificar si está ocupado por solape real
+      const isOccupied = busyEvents.some(event => event.start.isBefore(slotEnd) && event.end.isAfter(slotStart));
+      if (isOccupied) {
         console.log(`❌ Slot ${hour}:00 ocupado`);
         continue;
       }
       
       // Verificar tiempo mínimo de anticipación (solo para hoy)
       if (isToday) {
-        const slotTime = dateMoment.clone().hour(hour).minute(0);
         const minimumTime = now.clone().add(1, 'hour');
-        if (slotTime.isBefore(minimumTime)) {
+        if (slotStart.isBefore(minimumTime)) {
           console.log(`❌ Slot ${hour}:00 demasiado pronto (mínimo 1 hora)`);
           continue;
         }

@@ -1047,7 +1047,10 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
             correctedHours = {
               start: config.workingHours.saturday.startHour || 10,
               end: config.workingHours.saturday.endHour || 14, // 2 PM (14:00)
-              dayName: workingHours.dayName
+              dayName: workingHours.dayName,
+              hasLunch: false,
+              lunchStart: null,
+              lunchEnd: null
             };
             console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
           } else {
@@ -1055,14 +1058,17 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
             correctedHours = {
               start: 10, // FORZADO: Siempre 10 AM
               end: 18,   // FORZADO: Siempre 6 PM (18:00)
-              dayName: workingHours.dayName
+              dayName: workingHours.dayName,
+              hasLunch: true,
+              lunchStart: config.workingHours.lunchStartHour || 14,
+              lunchEnd: config.workingHours.lunchEndHour || 15
             };
           }
           
           console.log(`📅 Procesando día ${dayInfo.label}: ${dateStr}`);
           console.log(`   - Horario original: ${workingHours.start}:00 - ${workingHours.end}:00`);
           console.log(`   - Horario corregido: ${correctedHours.start}:00 - ${correctedHours.end}:00`);
-          console.log(`   - Horario comida: Flexible según eventos del calendario`);
+          console.log(`   - Horario comida: ${correctedHours.hasLunch ? `${correctedHours.lunchStart}:00-${correctedHours.lunchEnd}:00` : 'No aplica'}`);
           
           // CORRECCIÓN: Calcular total slots posibles (horario laboral completo)
           // Incluir el slot de la última hora (6 PM) como última sesión
@@ -1210,7 +1216,10 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
         correctedHours = {
           start: config.workingHours.saturday.startHour || 10,
           end: config.workingHours.saturday.endHour || 14, // 2 PM (14:00)
-          dayName: workingHours.dayName
+          dayName: workingHours.dayName,
+          hasLunch: false,
+          lunchStart: null,
+          lunchEnd: null
         };
         console.log(`   📅 SÁBADO - Horario especial: ${correctedHours.start}:00 - ${correctedHours.end}:00 (última sesión: ${correctedHours.end}:00)`);
       } else {
@@ -1218,7 +1227,10 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
         correctedHours = {
           start: 10, // FORZADO: Siempre 10 AM
           end: 18,   // FORZADO: Siempre 6 PM (18:00)
-          dayName: workingHours.dayName
+          dayName: workingHours.dayName,
+          hasLunch: true,
+          lunchStart: config.workingHours.lunchStartHour || 14,
+          lunchEnd: config.workingHours.lunchEndHour || 15
         };
       }
       
