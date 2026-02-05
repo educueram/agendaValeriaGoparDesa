@@ -858,16 +858,29 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     const { service: serviceNumber, date: targetDateStr } = req.query;
     const calendarNumber = '1'; // Hardcodeado: siempre usar calendario 1
 
-    console.log('Parámetros recibidos:', { calendarNumber: calendarNumber + ' (hardcodeado)', serviceNumber, targetDateStr });
+    const hasExplicitDate = Boolean(targetDateStr);
+    const daysParamRaw = req.query?.days;
+    const daysParam = daysParamRaw !== undefined ? parseInt(daysParamRaw, 10) : null;
+    const isMultiDayRequest = !hasExplicitDate && Number.isFinite(daysParam) && daysParam > 0;
 
-    if (!serviceNumber || !targetDateStr) {
+    console.log('Parámetros recibidos:', {
+      calendarNumber: calendarNumber + ' (hardcodeado)',
+      serviceNumber,
+      targetDateStr,
+      days: daysParamRaw
+    });
+
+    if (!serviceNumber || (!targetDateStr && !isMultiDayRequest)) {
       return res.json(createJsonResponse({ 
-        respuesta: '⚠️ Error: Faltan parámetros. Se requiere "service" y "date".' 
+        respuesta: '⚠️ Error: Faltan parámetros. Se requiere "service" y "date" (o "days").' 
       }));
     }
     
+    const today = moment().tz(config.timezone.default).startOf('day');
+    const normalizedTargetDateStr = targetDateStr || today.format('YYYY-MM-DD');
+
     // Parsear fecha directamente en zona horaria de México para evitar desajustes
-    const targetMoment = moment.tz(targetDateStr, 'YYYY-MM-DD', config.timezone.default);
+    const targetMoment = moment.tz(normalizedTargetDateStr, 'YYYY-MM-DD', config.timezone.default);
     if (!targetMoment.isValid()) {
       return res.json(createJsonResponse({ 
         respuesta: '⚠️ Error: Formato de fecha inválido. Por favor, usa el formato YYYY-MM-DD.' 
@@ -903,12 +916,14 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
 
     console.log(`✅ Calendar ID: ${calendarId}, Service Duration: ${serviceDuration} min`);
     
-    // LÓGICA MEJORADA: Consultar los próximos 4-5 días desde la fecha solicitada
-    const today = moment().tz(config.timezone.default).startOf('day');
+    // LÓGICA MEJORADA: Consultar varios días desde la fecha solicitada
     
     console.log(`📅 === CONSULTA DE MÚLTIPLES DÍAS ===`);
     console.log(`   - Hoy: ${today.format('YYYY-MM-DD')}`);
     console.log(`   - Fecha solicitada: ${targetMoment.format('YYYY-MM-DD')}`);
+    if (isMultiDayRequest) {
+      console.log(`   - Modo multidia: ${daysParam} días (sin fecha explícita)`);
+    }
     
     // Validar que no sea una fecha en el pasado
     if (targetMoment.isBefore(today, 'day')) {
@@ -959,12 +974,12 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       }));
     }
     
-    // NUEVA LÓGICA: Consultar solo el día solicitado + 1 día más (total 2 días)
+    // NUEVA LÓGICA: Consultar varios días según el modo
     // Si la fecha solicitada es hoy o en el futuro, empezar desde ahí
     // Si es en el pasado, empezar desde hoy
     const datesToCheck = [];
-    const maxDaysToCheck = 3; // Revisar hasta 3 días para obtener 2 días válidos (excluyendo domingos)
-    const totalDaysRequired = 2; // Total: día solicitado + 1 día más
+    const totalDaysRequired = isMultiDayRequest ? daysParam : 2; // Multidía o: día solicitado + 1 día más
+    const maxDaysToCheck = totalDaysRequired + 7; // Colchón para saltar domingos
     
     let daysAdded = 0;
     for (let i = 0; i < maxDaysToCheck && daysAdded < totalDaysRequired; i++) {
@@ -976,18 +991,19 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
         continue;
       }
       
+      const isRequestedDay = hasExplicitDate && i === 0;
       datesToCheck.push({
         date: checkDate.toDate(),
-        label: i === 0 ? 'solicitado' : 'siguiente',
-        emoji: i === 0 ? '📅' : '📆',
+        label: isRequestedDay ? 'solicitado' : 'proximo',
+        emoji: isRequestedDay ? '📅' : '📆',
         priority: daysAdded + 1
       });
       daysAdded++;
     }
     
-    console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS (DÍA SOLICITADO + 1 MÁS) ===`);
+    console.log(`📊 === CONSULTA DE ${datesToCheck.length} DÍAS ===`);
     console.log(`📅 Fecha inicial: ${startDate.format('YYYY-MM-DD')} (${startDate.format('dddd')})`);
-    console.log(`📅 Días a consultar: ${datesToCheck.length} (solo día solicitado + 1 día más)`);
+    console.log(`📅 Días a consultar: ${datesToCheck.length}`);
     datesToCheck.forEach((day, idx) => {
       const dayMoment = moment(day.date).tz(config.timezone.default);
       console.log(`   ${idx + 1}. ${dayMoment.format('YYYY-MM-DD')} (${dayMoment.format('dddd')})`);
@@ -1392,6 +1408,9 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
       */
     
     responseText += `💡 Escribe la letra del horario que prefieras`;
+    if (isMultiDayRequest && !hasExplicitDate) {
+      responseText += `\nTambien puedes preguntar por una fecha en especifico`;
+    }
     
     return res.json(createJsonResponse({ 
       respuesta: responseText,
@@ -4278,7 +4297,7 @@ const swaggerDocument = {
     '/api/consulta-disponibilidad': {
       get: {
         summary: 'Consulta disponibilidad de horarios',
-        description: 'Consulta horarios disponibles de los próximos 4-5 días en un solo mensaje. Muestra todos los horarios disponibles de forma compacta para facilitar la selección.',
+        description: 'Consulta horarios disponibles en un solo mensaje. Si se envía "days", consulta esa cantidad de días desde la fecha indicada o desde hoy.',
         parameters: [
           {
             name: 'calendar',
@@ -4286,6 +4305,13 @@ const swaggerDocument = {
             required: true,
             description: 'Número identificador del calendario',
             schema: { type: 'integer', example: 1 }
+          },
+          {
+            name: 'days',
+            in: 'query',
+            required: false,
+            description: 'Cantidad de días a consultar (si no se envía date)',
+            schema: { type: 'integer', example: 4 }
           },
           {
             name: 'service',
