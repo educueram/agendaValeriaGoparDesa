@@ -1023,7 +1023,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
     const buildAvailabilityResponse = (daysWithSlots) => {
       daysWithSlots.sort((a, b) => a.priority - b.priority);
 
-      let responseText = '📅 *Estas son las fechas que tenemos disponibles:*\n\n';
+      let responseText = '📅 *Estas son las proximas fechas que tenemos disponibles:*\n\n';
       
       const totalSlotsAvailable = daysWithSlots.reduce((sum, day) => sum + day.stats.availableSlots, 0);
       const avgOccupation = Math.round(daysWithSlots.reduce((sum, day) => sum + day.stats.occupationPercentage, 0) / daysWithSlots.length);
@@ -1060,10 +1060,7 @@ app.get('/api/consulta-disponibilidad', async (req, res) => {
         responseText += `${formatSlotsForWhatsApp(formattedSlots)}\n\n`;
       }
 
-      responseText += `💡 Escribe la letra del horario que prefieras`;
-      if (isMultiDayRequest && menuMode) {
-        responseText += `\nTambien puedes preguntar por una fecha en especifico`;
-      }
+      responseText += `💡 Escribe la letra del horario que prefieras. Si necesitas una fecha en especifico hazmelo saber`;
 
       return createJsonResponse({ 
         respuesta: responseText,
